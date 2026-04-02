@@ -1,0 +1,28 @@
+# Secrets & sessions
+config.json
+.env
+*_session.json
+
+# Chrome profiles
+chrome_profile/
+shutterstock_profile/
+pixta_profile/
+
+# CSV output
+csv_output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
