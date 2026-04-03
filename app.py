@@ -35,12 +35,16 @@ CONFIG_FILE = Path(__file__).parent / "config.json"
 def load_config() -> dict:
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"api_key": "", "input_folder": "", "variation_folder": ""}
+            config = json.load(f)
+    else:
+        config = {"api_key": "", "input_folder": "", "variation_folder": ""}
+    config["api_key"] = os.environ.get("GEMINI_API_KEY", config.get("api_key", ""))
+    return config
 
 def save_config(config: dict):
+    save_data = {k: v for k, v in config.items() if k != "api_key"}
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+        json.dump(save_data, f, ensure_ascii=False, indent=2)
 
 # ============================================================
 # GUIアプリ
@@ -58,9 +62,31 @@ class StockTaggerApp:
         self.is_running = False
         self.last_results = []   # 工程1の結果を保持
         self.last_folder = ""    # 処理したフォルダを保持
+        # 有効サイト設定（デフォルト全ON）
+        enabled = self.config.get("enabled_sites", ["adobe", "shutterstock", "pixta"])
+        self.adobe_enabled = tk.BooleanVar(value="adobe" in enabled)
+        self.ss_enabled = tk.BooleanVar(value="shutterstock" in enabled)
+        self.pixta_enabled = tk.BooleanVar(value="pixta" in enabled)
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._setup_styles()
         self._build_ui()
+
+    def _on_close(self):
+        self.root.destroy()
+        os._exit(0)
+
+    def _show_topmost_popup(self, title: str, message: str, error: bool = False):
+        """最前面ポップアップで結果を通知する"""
+        top = tk.Toplevel(self.root)
+        top.withdraw()
+        top.attributes("-topmost", True)
+        if error:
+            messagebox.showwarning(title, message, parent=top)
+        else:
+            messagebox.showinfo(title, message, parent=top)
+        top.destroy()
 
     def _setup_styles(self):
         style = ttk.Style()
@@ -192,10 +218,29 @@ class StockTaggerApp:
 
         card.columnconfigure(1, weight=1)
 
+        # アップロード先サイト
+        ttk.Label(card, text="アップロード先", style="Card.TLabel",
+            font=("Helvetica", 9, "bold")).grid(row=3, column=0, sticky="w", pady=(8, 0))
+
+        sites_frame = ttk.Frame(card, style="Card.TFrame")
+        sites_frame.grid(row=3, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0))
+
+        for text, var, color in [
+            ("Adobe Stock", self.adobe_enabled, "#1a6fa8"),
+            ("Shutterstock", self.ss_enabled, "#cc5500"),
+            ("Pixta", self.pixta_enabled, "#b5338a"),
+        ]:
+            tk.Checkbutton(sites_frame,
+                text=text, variable=var,
+                bg="#16213e", fg=color, activebackground="#16213e",
+                activeforeground=color, selectcolor="#0f3460",
+                relief="flat", font=("Helvetica", 9), cursor="hand2"
+            ).pack(side=tk.LEFT, padx=(0, 12))
+
         # 設定保存ボタン
         ttk.Button(card, text="設定を保存",
             style="Browse.TButton",
-            command=self._save_settings).grid(row=3, column=2, sticky="e", pady=(10, 0))
+            command=self._save_settings).grid(row=4, column=2, sticky="e", pady=(10, 0))
 
         # --- 実行ボタン (1行目) ---
         btn_frame1 = ttk.Frame(main, style="TFrame")
@@ -340,11 +385,22 @@ class StockTaggerApp:
         if folder:
             self.variation_folder_var.set(folder)
 
+    def _get_enabled_sites(self) -> list:
+        sites = []
+        if self.adobe_enabled.get():
+            sites.append("adobe")
+        if self.ss_enabled.get():
+            sites.append("shutterstock")
+        if self.pixta_enabled.get():
+            sites.append("pixta")
+        return sites
+
     def _save_settings(self):
         config = {
             "api_key": self.api_key_var.get().strip(),
             "input_folder": self.folder_var.get().strip(),
-            "variation_folder": self.variation_folder_var.get().strip()
+            "variation_folder": self.variation_folder_var.get().strip(),
+            "enabled_sites": self._get_enabled_sites()
         }
         save_config(config)
         self._log("設定を保存しました。", "success")
@@ -353,7 +409,6 @@ class StockTaggerApp:
         """工程0: バリエーションフォルダをリネーム → 自動で工程1へ"""
         if self.is_running:
             return
-
         api_key = self.api_key_var.get().strip()
         folder = self.folder_var.get().strip()
         variation_folder = self.variation_folder_var.get().strip()
@@ -429,11 +484,88 @@ class StockTaggerApp:
             messagebox.showerror("エラー", "素材フォルダを指定してください。")
             return
 
-        self._save_settings()
-        self.is_running = True
-        self.run_btn.state(["disabled"])
-        self.progress_var.set(0)
-        self._log("\n" + "─" * 50, "dim")
+        if pipeline_mode:
+            self._ensure_sessions_then_start(folder, api_key)
+        else:
+            self._do_start_processing(folder, api_key, pipeline_mode)
+
+    def _login_then_run(self, name: str, mod_name: str, continuation):
+        """セッションがない場合にログインを促し、完了後にcontinuationを実行する。"""
+        if not messagebox.askyesno("ログインが必要です", f"{name} にログインしていません。\n今すぐブラウザでログインしますか？"):
+            return
+        import importlib
+        mod = importlib.import_module(mod_name)
+        done_event = threading.Event()
+        def show_dialog(ev=done_event, n=name):
+            messagebox.showinfo(f"{n} ログイン", f"ブラウザで{n}にログインしてください。\nログインが完了したらOKを押してください。")
+            ev.set()
+        def run_login():
+            mod._confirm_callback = lambda ev=done_event: (self.root.after(0, show_dialog), ev.wait())
+            mod.save_session()
+            mod._confirm_callback = None
+            self.root.after(0, continuation)
+        threading.Thread(target=run_login, daemon=True).start()
+
+    def _ensure_sessions_then_start(self, folder: str, api_key: str):
+        from adobe_portal import SESSION_FILE as ADOBE_SESSION
+        from shutterstock_portal import SESSION_FILE as SS_SESSION
+        from pixta_portal import SESSION_FILE as PIXTA_SESSION
+
+        login_map = [
+            ("Adobe Stock", ADOBE_SESSION, "adobe_login"),
+            ("Shutterstock", SS_SESSION, "shutterstock_login"),
+            ("Pixta", PIXTA_SESSION, "pixta_login"),
+        ]
+        missing = [(name, mod) for name, sf, mod in login_map if not sf.exists()]
+
+        if missing:
+            names = "\n".join(f"• {name}" for name, _ in missing)
+            if not messagebox.askyesno(
+                "ログインが必要です",
+                f"以下のサイトにログインしていません:\n{names}\n\n今すぐブラウザでログインしますか？"
+            ):
+                return
+
+            self._save_settings()
+            self.is_running = True
+            self.run_btn.state(["disabled"])
+            self._log("\n" + "─" * 50, "dim")
+            self._log("ログイン処理を開始します...", "info")
+
+            def run_logins():
+                import importlib
+                for name, mod_name in missing:
+                    self.root.after(0, lambda n=name: self._log(f"🔐 {n} のブラウザを開きます。ログインしてください...", "info"))
+                    mod = importlib.import_module(mod_name)
+
+                    done_event = threading.Event()
+                    def show_dialog(ev=done_event, n=name):
+                        messagebox.showinfo(
+                            f"{n} ログイン",
+                            f"ブラウザで{n}にログインしてください。\nログインが完了したらOKを押してください。"
+                        )
+                        ev.set()
+                    mod._confirm_callback = lambda ev=done_event: (
+                        self.root.after(0, show_dialog),
+                        ev.wait()
+                    )
+                    mod.save_session()
+                    mod._confirm_callback = None
+
+                    self.root.after(0, lambda n=name: self._log(f"[OK] {n} ログイン完了", "info"))
+                self.root.after(0, lambda: self._do_start_processing(folder, api_key, pipeline_mode=True, already_started=True))
+
+            threading.Thread(target=run_logins, daemon=True).start()
+        else:
+            self._do_start_processing(folder, api_key, pipeline_mode=True)
+
+    def _do_start_processing(self, folder: str, api_key: str, pipeline_mode: bool = False, already_started: bool = False):
+        if not already_started:
+            self._save_settings()
+            self.is_running = True
+            self.run_btn.state(["disabled"])
+            self.progress_var.set(0)
+            self._log("\n" + "─" * 50, "dim")
         self._log(f"処理開始: {folder}", "info")
 
         thread = threading.Thread(
@@ -502,6 +634,11 @@ class StockTaggerApp:
                     self.is_running = False
                     self.run_btn.state(["!disabled"])
                     self.step0_btn.config(state="normal", bg="#64ffda", fg="#0a0a1a")
+                    msg = f"成功: {result['success']}件 / エラー: {result['error']}件"
+                    if result["errors"]:
+                        self._show_topmost_popup("工程1 完了（エラーあり）", msg, error=True)
+                    else:
+                        self._show_topmost_popup("工程1 完了", msg)
 
             self.root.after(0, on_complete)
 
@@ -531,6 +668,7 @@ class StockTaggerApp:
         folder_path = _Path(folder)
         csv_folder = folder_path / "csv_output"
         failed_services = []  # エラーが発生したサービス名を記録
+        enabled_sites = self._get_enabled_sites()
 
         # ---- Adobe Stock ----
         adobe_csvs = sorted(csv_folder.glob("adobe_stock_*.csv"),
@@ -540,8 +678,11 @@ class StockTaggerApp:
         adobe_targets = get_upload_targets(folder_path, "adobe")
         vector_eps_files = get_vector_eps_files(folder_path)
 
-        if not ADOBE_SESSION.exists():
+        if "adobe" not in enabled_sites:
+            log("[—] Adobe Stock は無効です。スキップします。")
+        elif not ADOBE_SESSION.exists():
             log("[!] adobe_session.json が見つかりません。Adobeをスキップします。")
+            failed_services.append("Adobe Stock")
         elif not adobe_targets:
             log("[!] Adobeにアップロード対象のファイルがありません。Adobeをスキップします。")
         elif not adobe_csvs:
@@ -564,7 +705,7 @@ class StockTaggerApp:
                 failed_services.append("Adobe Stock")
 
         # Adobe ベクター EPS アップロード
-        if vector_eps_files and vector_adobe_csvs and ADOBE_SESSION.exists():
+        if "adobe" in enabled_sites and vector_eps_files and vector_adobe_csvs and ADOBE_SESSION.exists():
             try:
                 log(f"\n☁ Adobe Vector EPS アップロード開始... ({len(vector_eps_files)}件)")
                 vec_adobe_result = run_portal_automation(
@@ -586,8 +727,11 @@ class StockTaggerApp:
                                 key=lambda f: f.stat().st_mtime, reverse=True)
         ss_targets = get_upload_targets(folder_path, "shutterstock")
 
-        if not SS_SESSION.exists():
+        if "shutterstock" not in enabled_sites:
+            log("[—] Shutterstock は無効です。スキップします。")
+        elif not SS_SESSION.exists():
             log("[!] shutterstock_session.json が見つかりません。Shutterstockをスキップします。")
+            failed_services.append("Shutterstock")
         elif not ss_csvs:
             log("[!] Shutterstock用CSVが見つかりません。Shutterstockをスキップします。")
         elif not ss_targets:
@@ -608,7 +752,7 @@ class StockTaggerApp:
                 failed_services.append("Shutterstock")
 
         # Shutterstock ベクター EPS アップロード
-        if vector_eps_files and vector_ss_csvs and SS_SESSION.exists():
+        if "shutterstock" in enabled_sites and vector_eps_files and vector_ss_csvs and SS_SESSION.exists():
             try:
                 log(f"\n☁ Shutterstock Vector EPS アップロード開始... ({len(vector_eps_files)}件)")
                 vec_ss_result = ss_portal(
@@ -624,8 +768,11 @@ class StockTaggerApp:
 
         # ---- Pixta 画像 ----
         video_targets = []
-        if not PIXTA_SESSION.exists():
+        if "pixta" not in enabled_sites:
+            log("[—] Pixta は無効です。スキップします。")
+        elif not PIXTA_SESSION.exists():
             log("[!] pixta_session.json が見つかりません。Pixtaをスキップします。")
+            failed_services.append("Pixta")
         else:
             all_targets = get_upload_targets(folder_path, "pixta")
             image_targets = [f for f in all_targets if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
@@ -644,7 +791,7 @@ class StockTaggerApp:
                 log("[!] Pixta画像アップロード対象がありません。スキップします。")
 
         # ---- Pixta 動画 ----
-        if video_targets and PIXTA_SESSION.exists():
+        if "pixta" in enabled_sites and video_targets and PIXTA_SESSION.exists():
             try:
                 log("\n" + "─" * 40)
                 log(f"🎬 Pixta 動画アップロード開始: {len(video_targets)}件...")
@@ -672,7 +819,7 @@ class StockTaggerApp:
 
         # ---- Pixta ベクター: XMP埋込 → ZIP作成 → アップロード ----
         vector_results = getattr(self, 'last_vector_results', [])
-        if vector_results and PIXTA_SESSION.exists():
+        if "pixta" in enabled_sites and vector_results and PIXTA_SESSION.exists():
             try:
                 log("\n" + "─" * 40)
                 log(f"🌸 Pixta Vector: XMP埋込 → ZIP作成 → アップロード...")
@@ -699,6 +846,12 @@ class StockTaggerApp:
                 self.is_running = False
                 self.run_btn.state(["!disabled"])
                 self.move_btn.config(state="normal", bg="#e94560")
+                svc_list = "\n".join(f"• {s}" for s in failed_services)
+                self._show_topmost_popup(
+                    "一部エラーあり",
+                    f"以下のサービスでエラーが発生しました:\n{svc_list}\n\nファイル移動をスキップしました。",
+                    error=True
+                )
             self.root.after(0, on_pipeline_error)
             return
         log("📦 ファイルを移動中...")
@@ -729,11 +882,15 @@ class StockTaggerApp:
             self.is_running = False
             self.run_btn.state(["!disabled"])
             self.step0_btn.config(state="normal", bg="#64ffda", fg="#0a0a1a")
+            self._show_topmost_popup("全工程完了", "アップロード＆ファイル移動まで全て完了しました。")
 
         self.root.after(0, on_pipeline_done)
 
     def _upload_adobe(self):
         """工程2: Adobe Stock ブラウザアップロード → ポータル提出"""
+        if not self.adobe_enabled.get():
+            messagebox.showinfo("無効", "Adobe Stock は無効になっています。\n設定のチェックボックスを確認してください。")
+            return
         from pathlib import Path as _Path
         from adobe_portal import SESSION_FILE
 
@@ -743,7 +900,7 @@ class StockTaggerApp:
             return
 
         if not SESSION_FILE.exists():
-            messagebox.showerror("エラー", "adobe_session.json が見つかりません。\n先に adobe_login.py を実行してください。")
+            self._login_then_run("Adobe Stock", "adobe_login", self._upload_adobe)
             return
 
         folder_path = _Path(folder)
@@ -809,20 +966,25 @@ class StockTaggerApp:
                 elif vector_eps:
                     log("[!] Adobe Vector用CSVが見つかりません。工程1を先に実行してください。")
 
-                self.root.after(0, lambda: (
-                    self._log("\n✓ 工程2 Adobe 完了！", "success"),
+                def on_adobe_done():
+                    self._log("\n✓ 工程2 Adobe 完了！", "success")
                     self.adobe_btn.config(state="normal", bg="#1a6fa8")
-                ))
+                    self._show_topmost_popup("工程2 完了", "Adobe Stock アップロード完了！")
+                self.root.after(0, on_adobe_done)
             except Exception as e:
-                self.root.after(0, lambda err=str(e): (
-                    self._log(f"\n[NG] Adobeエラー: {err}", "error"),
+                def on_adobe_err(err=str(e)):
+                    self._log(f"\n[NG] Adobeエラー: {err}", "error")
                     self.adobe_btn.config(state="normal", bg="#1a6fa8")
-                ))
+                    self._show_topmost_popup("工程2 エラー", f"Adobeエラー:\n{err}", error=True)
+                self.root.after(0, on_adobe_err)
 
         threading.Thread(target=run, daemon=True).start()
 
     def _upload_shutterstock(self):
         """工程1.7: Shutterstock ブラウザアップロード → ポータルCSV適用 → 審査提出"""
+        if not self.ss_enabled.get():
+            messagebox.showinfo("無効", "Shutterstock は無効になっています。\n設定のチェックボックスを確認してください。")
+            return
         from shutterstock_portal import run_portal_automation as ss_portal, SESSION_FILE as SS_SESSION
         from stock_tagger import get_upload_targets
 
@@ -832,11 +994,7 @@ class StockTaggerApp:
             return
 
         if not SS_SESSION.exists():
-            messagebox.showerror(
-                "エラー",
-                "shutterstock_session.json が見つかりません。\n"
-                "先に shutterstock_login.py を実行してセッションを保存してください。"
-            )
+            self._login_then_run("Shutterstock", "shutterstock_login", self._upload_shutterstock)
             return
 
         from pathlib import Path as _Path
@@ -895,18 +1053,23 @@ class StockTaggerApp:
                 def on_done():
                     self._log("\n✓ 工程3 Shutterstock 完了！", "success")
                     self.ss_btn.config(state="normal", bg="#cc5500")
+                    self._show_topmost_popup("工程3 完了", "Shutterstock アップロード完了！")
                 self.root.after(0, on_done)
 
             except Exception as e:
-                self.root.after(0, lambda err=str(e): (
-                    self._log(f"\n[NG] エラー: {err}", "error"),
+                def on_ss_err(err=str(e)):
+                    self._log(f"\n[NG] エラー: {err}", "error")
                     self.ss_btn.config(state="normal", bg="#cc5500")
-                ))
+                    self._show_topmost_popup("工程3 エラー", f"Shutterstockエラー:\n{err}", error=True)
+                self.root.after(0, on_ss_err)
 
         threading.Thread(target=run, daemon=True).start()
 
     def _upload_pixta(self):
         """工程4: Pixta 画像アップロード → 動画アップロード（Gemini解析 → 審査申請）"""
+        if not self.pixta_enabled.get():
+            messagebox.showinfo("無効", "Pixta は無効になっています。\n設定のチェックボックスを確認してください。")
+            return
         from pixta_portal import run_upload_and_submit as pixta_upload, SESSION_FILE as PIXTA_SESSION
         from pixta_footage_portal import run_footage_upload
         from pathlib import Path as _Path
@@ -918,7 +1081,7 @@ class StockTaggerApp:
             return
 
         if not PIXTA_SESSION.exists():
-            messagebox.showerror("エラー", "pixta_session.json が見つかりません。\n先に pixta_login.py を実行してください。")
+            self._login_then_run("Pixta", "pixta_login", self._upload_pixta)
             return
 
         api_key = self.api_key_var.get().strip()
@@ -973,15 +1136,17 @@ class StockTaggerApp:
                     else:
                         log("[!] Vector ZIP作成に失敗しました。")
 
-                self.root.after(0, lambda: (
-                    self._log("\n✓ 工程4 Pixta 完了！", "success"),
+                def on_pixta_done():
+                    self._log("\n✓ 工程4 Pixta 完了！", "success")
                     self.pixta_btn.config(state="normal", bg="#b5338a")
-                ))
+                    self._show_topmost_popup("工程4 完了", "Pixta アップロード完了！")
+                self.root.after(0, on_pixta_done)
             except Exception as e:
-                self.root.after(0, lambda err=str(e): (
-                    self._log(f"\n[NG] Pixtaエラー: {err}", "error"),
+                def on_pixta_err(err=str(e)):
+                    self._log(f"\n[NG] Pixtaエラー: {err}", "error")
                     self.pixta_btn.config(state="normal", bg="#b5338a")
-                ))
+                    self._show_topmost_popup("工程4 エラー", f"Pixtaエラー:\n{err}", error=True)
+                self.root.after(0, on_pixta_err)
 
         threading.Thread(target=run, daemon=True).start()
 

@@ -6,6 +6,8 @@ Stock Media Auto Tagger - メイン処理モジュール
 
 import os
 import re
+from dotenv import load_dotenv
+load_dotenv()
 import csv
 import json
 import time
@@ -72,119 +74,27 @@ CONFIG_FILE = Path(__file__).parent / "config.json"
 def load_config() -> dict:
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"api_key": "", "input_folder": "", "variation_folder": "", "backup_folder": ""}
+            config = json.load(f)
+    else:
+        config = {"api_key": "", "input_folder": "", "variation_folder": "", "backup_folder": ""}
+    config["api_key"] = os.environ.get("GEMINI_API_KEY", config.get("api_key", ""))
+    return config
 
 
 def _get_config_value(key: str, default: str = "") -> str:
     return load_config().get(key, default)
 
 # ============================================================
-# プロンプト定義
+# プロンプト定義（外部ファイルから読み込み）
 # ============================================================
 
-IMAGE_PROMPT = """あなたはストックフォト・ストックイラストに特化したタグ・タイトル生成の専門家です。
+PROMPTS_DIR = Path(__file__).parent / "prompts"
 
-以下のルールに従って、アップロードされた画像に対して、Adobe Stock・Shutterstock・PIXTA両方に適した英語と日本語のタイトル・タグを作成してください。
+def _load_prompt(name: str) -> str:
+    return (PROMPTS_DIR / name).read_text(encoding="utf-8")
 
-##【カテゴリ選定ルール】
-Adobe Stock用カテゴリを1つ選んでください：
-動物、建物・建築、ビジネス、飲み物、環境、感情と情緒、食べ物、グラフィック素材、趣味とレジャー、産業、風景、ライフスタイル、人物、植物・花、宗教・文化、科学、社会問題、スポーツ、テクノロジー、交通手段、旅行
-
-Shutterstock用カテゴリを最も適したものから2つ選んでください（異なる2つを選ぶこと）：
-動物・野生生物、アート、背景・テクスチャ、建物・都市、ビジネス・金融、教育、食べ物・飲み物、ヘルスケア・医療、年中行事・ホリデー、産業・工業、自然、物、人物、宗教、科学、アイコン・記号・標識、スポーツ・娯楽、テクノロジー、交通
-
-##【Adobe Stock向けルール】
-- タグは原則1〜2語の単語単位
-- タイトルは5語以上
-- タイトルに使われた語を上位タグ10個に含める
-- タグは25個程度
-- 長いフレーズや曖昧な抽象語は使用しない
-- 媒体種ワード（vector、素材、clipartなど）は画像に明示されない限り含めない
-
-##【Shutterstock向けルール】
-- タイトル（Description）は英語で簡潔な1文、70文字以内を目安にすること
-- タイトルはニュースの見出しのようにWho・What・Where・Whyを意識した説明的な1文にする
-- キーワードは英語のみ、必ず50個ちょうど生成すること（49個以下・51個以上は禁止）
-- キーワードは単語または短いフレーズ、関連性の高いものを優先
-- スペルミス・文法エラー・絵文字は禁止
-- 商標・ブランド名・個人情報は含めない
-
-##【PIXTA向けルール】
-- タグはすべて日本語で単語単位
-- フレーズや文章形式は禁止
-- タグの区切りはカンマ
-- 助詞「の」で繋がった複合語は分解する
-- 50個の自然で重複のない日本語タグ
-
-##【共通禁止事項】
-- 曖昧・抽象・詩的な表現
-- 関連性のないトレンドワードの混入
-
-必ず以下のJSON形式のみで返答してください（他のテキストは一切含めないこと）：
-
-{
-  "adobe_category": "Adobe Stockカテゴリ名",
-  "adobe_title_en": "英語タイトル",
-  "adobe_keywords_en": "keyword1, keyword2, ...",
-  "shutterstock_category1": "Shutterstockカテゴリ1",
-  "shutterstock_category2": "Shutterstockカテゴリ2",
-  "shutterstock_title_en": "英語タイトル",
-  "shutterstock_keywords_en": "keyword1, keyword2, ...",
-  "pixta_title_ja": "日本語タイトル",
-  "pixta_keywords_ja": "キーワード1, キーワード2, ..."
-}"""
-
-VIDEO_PROMPT = """あなたはストック動画に特化したタグ・タイトル生成の専門家です。
-
-以下のルールに従って、アップロードされた動画に対して、Adobe Stock・Shutterstock・PIXTA両方に適した英語と日本語のタイトル・タグを作成してください。
-必ず「動画・映像素材」であることを意識して作成してください。
-
-##【カテゴリ選定ルール】
-Adobe Stock用カテゴリを1つ選んでください：
-動物、建物・建築、ビジネス、飲み物、環境、感情と情緒、食べ物、グラフィック素材、趣味とレジャー、産業、風景、ライフスタイル、人物、植物・花、宗教・文化、科学、社会問題、スポーツ、テクノロジー、交通手段、旅行
-
-Shutterstock用カテゴリを最も適したものから2つ選んでください（異なる2つを選ぶこと）：
-動物・野生生物、アート、背景・テクスチャ、建物・都市、ビジネス・金融、教育、食べ物・飲み物、ヘルスケア・医療、年中行事・ホリデー、産業・工業、自然、物、人物、宗教、科学、アイコン・記号・標識、スポーツ・娯楽、テクノロジー、交通
-
-##【Adobe Stock向けルール】
-- タグは原則1〜2語の単語単位
-- タイトルは5語以上
-- タグは25個程度
-- 媒体種ワード（vector、素材など）は含めない
-
-##【Shutterstock向けルール】
-- タイトル（Description）は英語で簡潔な1文、70文字以内を目安にすること
-- タイトルはニュースの見出しのようにWho・What・Where・Whyを意識した説明的な1文にする
-- キーワードは英語のみ、必ず50個ちょうど生成すること（49個以下・51個以上は禁止）
-- キーワードは単語または短いフレーズ、動画・映像としての使用シーンを意識したものを含める
-- スペルミス・文法エラー・絵文字は禁止
-- 商標・ブランド名・個人情報は含めない
-
-##【PIXTA向けルール】
-- タグはすべて日本語で単語単位
-- フレーズ・文章形式は禁止
-- タグの区切りはカンマ
-- 助詞「の」で繋がった複合語は分解
-- 50個の自然で重複のない日本語タグ
-
-##【共通禁止事項】
-- 曖昧・抽象・詩的な表現
-- 関連性のないトレンドワードの混入
-
-必ず以下のJSON形式のみで返答してください（他のテキストは一切含めないこと）：
-
-{
-  "adobe_category": "Adobe Stockカテゴリ名",
-  "adobe_title_en": "英語タイトル",
-  "adobe_keywords_en": "keyword1, keyword2, ...",
-  "shutterstock_category1": "Shutterstockカテゴリ1",
-  "shutterstock_category2": "Shutterstockカテゴリ2",
-  "shutterstock_title_en": "英語タイトル",
-  "shutterstock_keywords_en": "keyword1, keyword2, ...",
-  "pixta_title_ja": "日本語タイトル",
-  "pixta_keywords_ja": "キーワード1, キーワード2, ..."
-}"""
+IMAGE_PROMPT = _load_prompt("image_prompt.txt")
+VIDEO_PROMPT = _load_prompt("video_prompt.txt")
 
 # ============================================================
 # Gemini API（直接REST呼び出し）
@@ -817,11 +727,10 @@ def detect_transparent_png_in_folder(folder: Path) -> bool:
 def get_upload_targets(folder: Path, site: str) -> list:
     """
     サイト別にアップロード対象ファイルを返す。
-    透過PNGが存在する場合、AdobeとPixtaはPNGのみ（JPG除外）。
+    Shutterstock: JPG・動画のみ（PNGはプラットフォーム非対応）
+    Adobe/Pixta: PNG・JPG・動画すべて
     site: 'adobe' | 'shutterstock' | 'pixta'
     """
-    has_transparent_png = detect_transparent_png_in_folder(folder)
-
     files = [f for f in folder.iterdir() if f.is_file()]
     result = []
 
@@ -833,9 +742,7 @@ def get_upload_targets(folder: Path, site: str) -> list:
         elif site in ("adobe", "pixta"):
             if ext in UPLOAD_VIDEO_EXTENSIONS:
                 result.append(f)
-            elif ext == ".png":
-                result.append(f)
-            elif ext in {".jpg", ".jpeg"} and not has_transparent_png:
+            elif ext in {".png", ".jpg", ".jpeg"}:
                 result.append(f)
 
     return result
@@ -1086,8 +993,9 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
 
     csv_folder = input_path / "csv_output"
     csv_folder.mkdir(exist_ok=True)
+    from send2trash import send2trash as _send2trash
     for old_csv in csv_folder.glob("*.csv"):
-        old_csv.unlink()
+        _send2trash(str(old_csv))
 
     base_dir = input_path.parent
     dest_folder = get_destination_folder(base_dir)
@@ -1371,41 +1279,48 @@ def prepare_vector_zips_with_xmp(input_folder: str, vector_results: list, progre
 
 
 def move_vector_subfolders(input_folder: str, progress_callback=None) -> dict:
+    """Vector/ 以下のサブフォルダを 01_done に移動"""
     input_path = Path(input_folder)
     dest_folder = get_destination_folder(input_path.parent)
     subfolders = get_vector_subfolders(input_path)
     moved = 0
     errors = []
     for subfolder in subfolders:
-        dst = dest_folder / subfolder.name
-        counter = 1
-        while dst.exists():
-            dst = dest_folder / f"{subfolder.name}_{counter}"
-            counter += 1
-        try:
-            shutil.move(str(subfolder), str(dst))
-            moved += 1
+        # 空フォルダはスキップ
+        if not any(subfolder.iterdir()):
             if progress_callback:
-                progress_callback(f"  移動: {subfolder.name} → {dst}")
-            # .eps.bak ファイルを削除
-            for bak in dst.glob("*.eps.bak"):
-                bak.unlink()
-                if progress_callback:
-                    progress_callback(f"  削除: {bak.name} (不要なバックアップ)")
-            # バックアップコピー
-            backup_folder = get_backup_folder()
-            if backup_folder:
-                try:
-                    backup_dst = backup_folder / dst.name
+                progress_callback(f"  スキップ（空フォルダ）: {subfolder.name}")
+            continue
+        try:
+            # 1. 先にバックアップコピー（ソースから直接コピー）
+            try:
+                backup_folder = get_backup_folder()
+                if backup_folder:
+                    backup_dst = backup_folder / subfolder.name
                     if not backup_dst.exists():
-                        shutil.copytree(str(dst), str(backup_dst))
+                        shutil.copytree(str(subfolder), str(backup_dst))
                         for bak in backup_dst.glob("*.eps.bak"):
                             bak.unlink()
                         if progress_callback:
                             progress_callback(f"  バックアップ: {backup_dst}")
-                except Exception as be:
-                    if progress_callback:
-                        progress_callback(f"  [!] Vectorバックアップ失敗（処理は続行）: {be}")
+            except Exception as be:
+                if progress_callback:
+                    progress_callback(f"  [!] Vectorバックアップ失敗（処理は続行）: {be}")
+
+            # 2. ローカル移動
+            dst = dest_folder / subfolder.name
+            counter = 1
+            while dst.exists():
+                dst = dest_folder / f"{subfolder.name}_{counter}"
+                counter += 1
+            shutil.move(str(subfolder), str(dst))
+            moved += 1
+            if progress_callback:
+                progress_callback(f"  移動: {subfolder.name} → {dst}")
+            for bak in dst.glob("*.eps.bak"):
+                bak.unlink()
+                if progress_callback:
+                    progress_callback(f"  削除: {bak.name} (不要なバックアップ)")
         except Exception as e:
             errors.append(subfolder.name)
             if progress_callback:

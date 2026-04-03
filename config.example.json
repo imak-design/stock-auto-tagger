@@ -1,6 +1,6 @@
 {
-  "api_key": "YOUR_GEMINI_API_KEY",
   "input_folder": "",
   "variation_folder": "",
-  "backup_folder": ""
+  "backup_folder": "",
+  "enabled_sites": ["adobe", "shutterstock", "pixta"]
 }

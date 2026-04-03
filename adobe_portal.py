@@ -734,7 +734,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        csv_folder = Path(r"D:\stock illust\00作成\csv_output")
+        csv_folder = Path("csv_output")
         csvs = sorted(csv_folder.glob("adobe_stock_*.csv"), key=lambda f: f.stat().st_mtime, reverse=True)
         if not csvs:
             print("CSVが見つかりません。パスを引数で指定してください。")

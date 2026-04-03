@@ -221,10 +221,29 @@ def run_upload_and_submit(files: list, progress_callback=None) -> dict:
             if "confirm" not in page.url:
                 raise RuntimeError(f"Expected confirm page but got: {page.url}")
 
+            log("Waiting for confirm page to fully load...")
+            page.wait_for_load_state("networkidle", timeout=30000)
+            time.sleep(2)
+
             log("Clicking submit-for-review button...")
             confirm_btn = page.locator("#confirm_upload_btn")
-            confirm_btn.wait_for(state="visible", timeout=10000)
-            confirm_btn.click()
+            try:
+                confirm_btn.scroll_into_view_if_needed(timeout=5000)
+                confirm_btn.wait_for(state="visible", timeout=30000)
+            except PWTimeout:
+                log(f"[DEBUG] confirm page URL: {page.url}")
+                log(f"[DEBUG] page title: {page.title()}")
+                exists = confirm_btn.count()
+                log(f"[DEBUG] #confirm_upload_btn count in DOM: {exists}")
+                if exists > 0:
+                    log("[DEBUG] Element exists but not visible, trying force click...")
+                    confirm_btn.click(force=True)
+                    log("Force-clicked 審査申請 button")
+                else:
+                    raise RuntimeError("#confirm_upload_btn not found on confirm page")
+            else:
+                confirm_btn.click()
+                log("Clicked 審査申請 button")
             time.sleep(5)
             log(f"Final URL: {page.url}")
 
@@ -326,10 +345,29 @@ def run_submit(progress_callback=None) -> dict:
             if "confirm" not in page.url:
                 raise RuntimeError(f"Expected confirm page but got: {page.url}")
 
+            log("Waiting for confirm page to fully load...")
+            page.wait_for_load_state("networkidle", timeout=30000)
+            time.sleep(2)
+
             log("Clicking submit-for-review button...")
             confirm_btn = page.locator("#confirm_upload_btn")
-            confirm_btn.wait_for(state="visible", timeout=10000)
-            confirm_btn.click()
+            try:
+                confirm_btn.scroll_into_view_if_needed(timeout=5000)
+                confirm_btn.wait_for(state="visible", timeout=30000)
+            except PWTimeout:
+                log(f"[DEBUG] confirm page URL: {page.url}")
+                log(f"[DEBUG] page title: {page.title()}")
+                exists = confirm_btn.count()
+                log(f"[DEBUG] #confirm_upload_btn count in DOM: {exists}")
+                if exists > 0:
+                    log("[DEBUG] Element exists but not visible, trying force click...")
+                    confirm_btn.click(force=True)
+                    log("Force-clicked 審査申請 button")
+                else:
+                    raise RuntimeError("#confirm_upload_btn not found on confirm page")
+            else:
+                confirm_btn.click()
+                log("Clicked 審査申請 button")
             time.sleep(5)
             log(f"Final URL: {page.url}")
 
@@ -359,7 +397,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent))
     from stock_tagger import get_upload_targets
 
-    input_folder = Path(r"D:\stock illust\00作成")
+    input_folder = Path("input")
     targets = get_upload_targets(input_folder, "pixta")
 
     if not targets:

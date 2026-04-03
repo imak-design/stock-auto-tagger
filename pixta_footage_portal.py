@@ -166,6 +166,8 @@ def run_footage_upload(
 
             # 各動画にタイトルとタグを入力（ファイル名で対応付け）
             import subprocess as _subprocess
+            import platform as _platform
+            _is_mac = _platform.system() == "Darwin"
 
             # metadataをファイル名（stem）→メタ のdictに変換
             meta_by_stem = {}
@@ -213,19 +215,26 @@ def run_footage_upload(
                         log(f"[{item_id}] [!] Failed to set title: {e}")
                         errors.append(f"Title input failed for {stem}: {e}")
 
-                # タグ入力（クリップボード経由でCtrl+V）
+                # タグ入力（クリップボード経由でペースト）
                 if tags:
                     try:
                         tag_str = ",".join(tags)
-                        _subprocess.run(
-                            ["powershell", "-command", f"Set-Clipboard -Value '{tag_str}'"],
-                            check=True
-                        )
+                        if _is_mac:
+                            _subprocess.run(
+                                ["pbcopy"],
+                                input=tag_str.encode("utf-8"),
+                                check=True,
+                            )
+                        else:
+                            _subprocess.run(
+                                ["powershell", "-command", f"Set-Clipboard -Value '{tag_str}'"],
+                                check=True,
+                            )
                         tag_inp = page.locator(f'[id="{item_id}-input-tags"]')
                         tag_inp.scroll_into_view_if_needed()
                         tag_inp.click()
                         time.sleep(0.2)
-                        tag_inp.press("Control+v")
+                        tag_inp.press("Meta+v" if _is_mac else "Control+v")
                         log(f"[{item_id}] Tags pasted: {len(tags)} tags")
                         time.sleep(0.8)
                     except Exception as e:
@@ -272,9 +281,14 @@ def run_footage_upload(
             if "confirm" not in page.url:
                 raise RuntimeError(f"Expected confirm page but got: {page.url}")
 
+            log("Waiting for confirm page to fully load...")
+            page.wait_for_load_state("networkidle", timeout=30000)
+            time.sleep(2)
+
             log("Clicking submit-for-review button on confirm page...")
-            confirm_btn = page.locator("#confirm_upload_btn")
-            confirm_btn.wait_for(state="visible", timeout=10000)
+            confirm_btn = page.locator("input[type='submit'][value='審査申請']")
+            confirm_btn.scroll_into_view_if_needed(timeout=5000)
+            confirm_btn.wait_for(state="visible", timeout=30000)
             confirm_btn.click()
             log("Clicked 審査申請 button")
 
@@ -306,8 +320,8 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
 
-    # テスト用: D:\stock illust\00作成\ の動画ファイルを対象にする
-    input_folder = Path(r"D:\stock illust\00作成")
+    # テスト用: 素材フォルダの動画ファイルを対象にする
+    input_folder = Path("input")
     video_exts = {".mp4", ".mov", ".avi", ".m4v"}
     video_files = [f for f in input_folder.iterdir() if f.suffix.lower() in video_exts]
 
