@@ -97,7 +97,7 @@ GEMINI_API_KEY=あなたのGemini APIキー
 
 API キーは [Google AI Studio](https://aistudio.google.com/apikey) で無料取得できます。
 
-> **注意**: `.env` ファイルは `.gitignore` に含まれているため、Git にはアップロードされません。`config.json` には API キーを書かないでください。
+> **注意**: `.env` ファイルは `.gitignore` に含まれているため、Git にはアップロードされません。`config.json` には API キーを書かないでください。また、Claude などの AI チャットに API キーを貼り付けると会話ログに残る可能性があるため、キーの設定は必ずご自身でテキストエディタから直接行ってください。
 
 ### 5. 各サイトにログインしてセッション保存
 
