@@ -38,7 +38,15 @@ brew install python
 [python.org](https://www.python.org/downloads/) からインストーラーをダウンロード。
 インストール時に **「Add Python to PATH」にチェック** を入れてください。
 
-### 2. このリポジトリをダウンロード
+### 2. Git のインストール（Windows のみ）
+
+Windows には Git が入っていないため、別途インストールが必要です（Mac は初回に自動インストールされます）。
+
+[git-scm.com](https://git-scm.com/downloads/win) からインストーラーをダウンロードし、デフォルト設定のままインストールしてください。
+
+> Git をインストールしたくない場合は、GitHub ページ上部の緑色の **「Code」ボタン → 「Download ZIP」** からダウンロードし、展開してください。
+
+### 3. このリポジトリをダウンロード
 
 ```bash
 # リポジトリをクローン
@@ -63,7 +71,7 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 3. 設定ファイルを作成
+### 4. 設定ファイルを作成
 
 ```bash
 cp config.example.json config.json
@@ -88,7 +96,7 @@ cp config.example.json config.json
 | `enabled_sites` | アップロードするサイト（不要なサイトを配列から削除） |
 | `test_mode` | `true` にするとアップロードまで実行し審査申請をスキップ（GUI からも切替可） |
 
-### 4. Gemini API キーの設定
+### 5. Gemini API キーの設定
 
 プロジェクトフォルダに `.env` ファイルを作成し、API キーを記入してください：
 
@@ -124,7 +132,7 @@ notepad %USERPROFILE%\Desktop\stock-auto-tagger\.env
 ```
 メモ帳で開きます。
 
-### 5. 各サイトにログインしてセッション保存
+### 6. 各サイトにログインしてセッション保存
 
 使いたいサイトだけでOKです：
 
@@ -136,7 +144,7 @@ python pixta_login.py         # Pixta
 
 ブラウザが開くので手動でログイン → セッションが自動保存されます。
 
-### 6. アプリ起動
+### 7. アプリ起動
 
 **Windows**: `起動する.bat` をダブルクリック、または：
 ```bash
