@@ -60,6 +60,8 @@ class StockTaggerApp:
 
         self.config = load_config()
         self.is_running = False
+        self._timer_id = None
+        self._timer_start = None
         self.last_results = []   # 工程1の結果を保持
         self.last_folder = ""    # 処理したフォルダを保持
         # 有効サイト設定（デフォルト全ON）
@@ -67,6 +69,7 @@ class StockTaggerApp:
         self.adobe_enabled = tk.BooleanVar(value="adobe" in enabled)
         self.ss_enabled = tk.BooleanVar(value="shutterstock" in enabled)
         self.pixta_enabled = tk.BooleanVar(value="pixta" in enabled)
+        self.test_mode = bool(self.config.get("test_mode", False))
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -168,23 +171,8 @@ class StockTaggerApp:
         card = ttk.Frame(main, style="Card.TFrame", padding=16)
         card.pack(fill=tk.X, pady=(0, 12))
 
-        # Gemini APIキー
-        ttk.Label(card, text="Gemini API キー", style="Card.TLabel",
-            font=("Helvetica", 9, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
-
+        # APIキーは.envで管理（UIには表示しない）
         self.api_key_var = tk.StringVar(value=self.config.get("api_key", ""))
-        api_entry = ttk.Entry(card, textvariable=self.api_key_var, show="•", width=55)
-        api_entry.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=(0, 4))
-
-        self.show_key_var = tk.BooleanVar()
-        show_btn = tk.Checkbutton(card,
-            text="表示",
-            variable=self.show_key_var,
-            command=lambda: api_entry.config(show="" if self.show_key_var.get() else "•"),
-            bg="#16213e", fg="#8892b0", activebackground="#16213e",
-            activeforeground="#64ffda", selectcolor="#0f3460",
-            relief="flat", font=("Helvetica", 9), cursor="hand2")
-        show_btn.grid(row=0, column=2, padx=(6, 0))
 
         # 素材フォルダ
         ttk.Label(card, text="素材フォルダ", style="Card.TLabel",
@@ -237,10 +225,32 @@ class StockTaggerApp:
                 relief="flat", font=("Helvetica", 9), cursor="hand2"
             ).pack(side=tk.LEFT, padx=(0, 12))
 
+        # テストモード切替
+        ttk.Label(card, text="モード", style="Card.TLabel",
+            font=("Helvetica", 9, "bold")).grid(row=4, column=0, sticky="w", pady=(8, 0))
+
+        mode_frame = ttk.Frame(card, style="Card.TFrame")
+        mode_frame.grid(row=4, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0))
+
+        self.test_mode_var = tk.BooleanVar(value=self.test_mode)
+        self.test_mode_cb = tk.Checkbutton(mode_frame,
+            text="テストモード（審査申請をスキップ）", variable=self.test_mode_var,
+            bg="#16213e", fg="#f38ba8", activebackground="#16213e",
+            activeforeground="#f38ba8", selectcolor="#0f3460",
+            relief="flat", font=("Helvetica", 9), cursor="hand2",
+            command=self._toggle_test_mode)
+        self.test_mode_cb.pack(side=tk.LEFT)
+
+        self.test_mode_label = tk.Label(mode_frame,
+            text="ON" if self.test_mode else "",
+            bg="#16213e", fg="#f38ba8",
+            font=("Helvetica", 9, "bold"))
+        self.test_mode_label.pack(side=tk.LEFT, padx=(8, 0))
+
         # 設定保存ボタン
         ttk.Button(card, text="設定を保存",
             style="Browse.TButton",
-            command=self._save_settings).grid(row=4, column=2, sticky="e", pady=(10, 0))
+            command=self._save_settings).grid(row=5, column=2, sticky="e", pady=(10, 0))
 
         # --- 実行ボタン (1行目) ---
         btn_frame1 = ttk.Frame(main, style="TFrame")
@@ -255,8 +265,14 @@ class StockTaggerApp:
             command=self._start_step0)
         self.step0_btn.pack(side=tk.LEFT)
 
-        self.run_btn = ttk.Button(btn_frame1, text="▶  【工程1】タグ生成 & CSV出力",
-            style="Run.TButton",
+        self.run_btn = tk.Button(btn_frame1,
+            text="▶  【工程1】タグ生成 & CSV出力",
+            bg="#e94560", fg="#ffffff",
+            font=("BIZ UDゴシック", 10, "bold"),
+            relief="flat", cursor="hand2",
+            activebackground="#c73652", activeforeground="#ffffff",
+            disabledforeground="#888888",
+            padx=16, pady=8,
             command=self._start_processing)
         self.run_btn.pack(side=tk.LEFT, padx=(12, 0))
 
@@ -395,12 +411,47 @@ class StockTaggerApp:
             sites.append("pixta")
         return sites
 
+    def _toggle_test_mode(self):
+        self.test_mode = self.test_mode_var.get()
+        self.test_mode_label.config(text="ON" if self.test_mode else "")
+
+    def _start_timer(self):
+        import time as _time
+        self._timer_start = _time.time()
+        self._update_timer()
+
+    def _update_timer(self):
+        if self._timer_start is None:
+            return
+        import time as _time
+        elapsed = int(_time.time() - self._timer_start)
+        m, s = divmod(elapsed, 60)
+        self.status_label.config(text=f"処理中 {m:02d}:{s:02d}")
+        self._timer_id = self.root.after(1000, self._update_timer)
+
+    def _stop_timer(self):
+        if self._timer_id is not None:
+            self.root.after_cancel(self._timer_id)
+            self._timer_id = None
+        self._timer_start = None
+
+    def _disable_btn(self, btn, bg="#4a4a6a", fg="#888888"):
+        btn.config(bg=bg, fg=fg, state="normal")
+        btn._cmd_backup = btn.cget("command")
+        btn.config(command="")
+
+    def _enable_btn(self, btn, bg, fg="#e0e0e0"):
+        btn.config(bg=bg, fg=fg)
+        cmd = getattr(btn, "_cmd_backup", "")
+        if cmd:
+            btn.config(command=cmd)
+
     def _save_settings(self):
         config = {
-            "api_key": self.api_key_var.get().strip(),
             "input_folder": self.folder_var.get().strip(),
             "variation_folder": self.variation_folder_var.get().strip(),
-            "enabled_sites": self._get_enabled_sites()
+            "enabled_sites": self._get_enabled_sites(),
+            "test_mode": self.test_mode_var.get()
         }
         save_config(config)
         self._log("設定を保存しました。", "success")
@@ -422,8 +473,8 @@ class StockTaggerApp:
 
         self._save_settings()
         self.is_running = True
-        self.step0_btn.config(state="disabled", bg="#4a4a6a", fg="#888888")
-        self.run_btn.state(["disabled"])
+        self._disable_btn(self.step0_btn)
+        self._disable_btn(self.run_btn)
         self.progress_var.set(0)
         self._log("\n" + "─" * 50, "dim")
         self._log("工程0開始: バリエーションフォルダをスキャン中...", "info")
@@ -453,11 +504,12 @@ class StockTaggerApp:
 
         except Exception as e:
             def on_error(err=str(e)):
+                self._stop_timer()
                 self._log(f"\n✗ エラー: {err}", "error")
                 self.status_label.config(text="エラー")
                 self.is_running = False
-                self.step0_btn.config(state="normal", bg="#64ffda", fg="#0a0a1a")
-                self.run_btn.state(["!disabled"])
+                self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
+                self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
                 messagebox.showerror("エラー", err)
             self.root.after(0, on_error)
 
@@ -528,7 +580,7 @@ class StockTaggerApp:
 
             self._save_settings()
             self.is_running = True
-            self.run_btn.state(["disabled"])
+            self._disable_btn(self.run_btn)
             self._log("\n" + "─" * 50, "dim")
             self._log("ログイン処理を開始します...", "info")
 
@@ -563,10 +615,12 @@ class StockTaggerApp:
         if not already_started:
             self._save_settings()
             self.is_running = True
-            self.run_btn.state(["disabled"])
+            self._disable_btn(self.run_btn)
             self.progress_var.set(0)
             self._log("\n" + "─" * 50, "dim")
         self._log(f"処理開始: {folder}", "info")
+        if self.test_mode:
+            self._start_timer()
 
         thread = threading.Thread(
             target=self._run_processing,
@@ -576,6 +630,8 @@ class StockTaggerApp:
         thread.start()
 
     def _run_processing(self, folder: str, api_key: str, pipeline_mode: bool = False):
+        if self.test_mode:
+            self.root.after(0, lambda: self._log("⚠ テストモードで実行中（審査申請はスキップされます）\n   v2: レート制限対策 / 処理時間表示 / テストモードUI追加", "error"))
         try:
             total_files = [0]
 
@@ -597,6 +653,7 @@ class StockTaggerApp:
 
             # 完了
             def on_complete(vr=vector_result):
+                self._stop_timer()
                 self.progress_var.set(100)
                 self.status_label.config(text="完了")
                 self._log("\n✓ 工程1完了！", "success")
@@ -611,7 +668,7 @@ class StockTaggerApp:
                 self.last_results = result.get("results", [])
                 self.last_folder = folder
                 if self.last_results:
-                    self.move_btn.config(state="normal", bg="#e94560")
+                    self._enable_btn(self.move_btn, bg="#e94560")
                 # 動画がある場合はコピーパネルを表示
                 if result.get("video_results"):
                     self._show_video_panel(result["video_results"])
@@ -632,8 +689,8 @@ class StockTaggerApp:
                 else:
                     self._log("\n各サイトにアップロード後、【工程2】ボタンを押してファイルを移動してください。", "info")
                     self.is_running = False
-                    self.run_btn.state(["!disabled"])
-                    self.step0_btn.config(state="normal", bg="#64ffda", fg="#0a0a1a")
+                    self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
+                    self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
                     msg = f"成功: {result['success']}件 / エラー: {result['error']}件"
                     if result["errors"]:
                         self._show_topmost_popup("工程1 完了（エラーあり）", msg, error=True)
@@ -644,11 +701,12 @@ class StockTaggerApp:
 
         except Exception as e:
             def on_error(err=str(e)):
+                self._stop_timer()
                 self._log(f"\n✗ エラー: {err}", "error")
                 self.status_label.config(text="エラー")
                 self.is_running = False
-                self.run_btn.state(["!disabled"])
-                self.step0_btn.config(state="normal", bg="#64ffda", fg="#0a0a1a")
+                self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
+                self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
                 messagebox.showerror("エラー", err)
 
             self.root.after(0, on_error)
@@ -664,6 +722,9 @@ class StockTaggerApp:
 
         def log(msg):
             self.root.after(0, lambda m=msg: self._log(m))
+
+        import time as _time
+        _pipeline_start = _time.time()
 
         folder_path = _Path(folder)
         csv_folder = folder_path / "csv_output"
@@ -697,7 +758,7 @@ class StockTaggerApp:
                     progress_callback=log,
                     headless=False,
                     files=adobe_targets,
-                    confirm_submit_callback=lambda: True,
+                    confirm_submit_callback=lambda: not self.test_mode,
                 )
                 log(f"[OK] Adobe ポータル提出完了: {portal_result['submitted']}件")
             except Exception as e:
@@ -713,7 +774,7 @@ class StockTaggerApp:
                     progress_callback=log,
                     headless=False,
                     files=vector_eps_files,
-                    confirm_submit_callback=lambda: True,
+                    confirm_submit_callback=lambda: not self.test_mode,
                 )
                 log(f"[OK] Adobe Vector 提出完了: {vec_adobe_result['submitted']}件")
             except Exception as e:
@@ -745,6 +806,7 @@ class StockTaggerApp:
                     files=ss_targets,
                     progress_callback=log,
                     headless=False,
+                    skip_submit=self.test_mode,
                 )
                 log(f"[OK] Shutterstock ポータル提出完了: {ss_portal_result['submitted']}件")
             except Exception as e:
@@ -760,6 +822,7 @@ class StockTaggerApp:
                     files=vector_eps_files,
                     progress_callback=log,
                     headless=False,
+                    skip_submit=self.test_mode,
                 )
                 log(f"[OK] Shutterstock Vector 提出完了: {vec_ss_result['submitted']}件")
             except Exception as e:
@@ -782,7 +845,7 @@ class StockTaggerApp:
                 try:
                     log("\n" + "─" * 40)
                     log(f"🌸 Pixta 画像アップロード開始: {len(image_targets)}件...")
-                    pixta_result = pixta_upload(files=image_targets, progress_callback=log)
+                    pixta_result = pixta_upload(files=image_targets, progress_callback=log, skip_submit=self.test_mode)
                     log(f"[OK] Pixta画像完了: アップロード{pixta_result['uploaded']}件 / 審査申請{pixta_result['submitted']}件")
                 except Exception as e:
                     log(f"[NG] Pixta画像 エラー: {e}")
@@ -811,6 +874,7 @@ class StockTaggerApp:
                     files=video_targets,
                     metadata=video_metadata,
                     progress_callback=log,
+                    skip_submit=self.test_mode,
                 )
                 log(f"[OK] Pixta動画完了: アップロード{footage_result['uploaded']}件 / 審査申請{footage_result['submitted']}件")
             except Exception as e:
@@ -826,7 +890,7 @@ class StockTaggerApp:
                 vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
                 if vector_zips:
                     log(f"🌸 Pixta Vector ZIP アップロード開始: {len(vector_zips)}件...")
-                    vec_pixta_result = pixta_upload(files=vector_zips, progress_callback=log)
+                    vec_pixta_result = pixta_upload(files=vector_zips, progress_callback=log, skip_submit=self.test_mode)
                     log(f"[OK] Pixta Vector 完了: アップロード{vec_pixta_result['uploaded']}件 / 審査申請{vec_pixta_result['submitted']}件")
                 else:
                     log("[!] ZIP作成に失敗しました。")
@@ -842,10 +906,11 @@ class StockTaggerApp:
                 log(f"    • {svc}")
             log("    問題を解消した後、【工程5】ボタンで手動移動してください。")
             def on_pipeline_error():
+                self._stop_timer()
                 self.status_label.config(text="一部エラーあり")
                 self.is_running = False
-                self.run_btn.state(["!disabled"])
-                self.move_btn.config(state="normal", bg="#e94560")
+                self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
+                self._enable_btn(self.move_btn, bg="#e94560")
                 svc_list = "\n".join(f"• {s}" for s in failed_services)
                 self._show_topmost_popup(
                     "一部エラーあり",
@@ -875,13 +940,18 @@ class StockTaggerApp:
             log(f"[NG] Vectorフォルダ移動エラー: {e}")
 
         # ---- 全工程完了 ----
+        _elapsed = _time.time() - _pipeline_start
+        _minutes = int(_elapsed // 60)
+        _seconds = int(_elapsed % 60)
+
         def on_pipeline_done():
+            self._stop_timer()
             self._log("\n" + "─" * 50, "dim")
-            self._log("✓ 全工程完了！アップロード＆ファイル移動まで全て完了しました。", "success")
+            self._log(f"✓ 全工程完了！（処理時間: {_minutes}分{_seconds}秒）", "success")
             self.status_label.config(text="完了")
             self.is_running = False
-            self.run_btn.state(["!disabled"])
-            self.step0_btn.config(state="normal", bg="#64ffda", fg="#0a0a1a")
+            self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
+            self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
             self._show_topmost_popup("全工程完了", "アップロード＆ファイル移動まで全て完了しました。")
 
         self.root.after(0, on_pipeline_done)
@@ -927,7 +997,7 @@ class StockTaggerApp:
         ):
             return
 
-        self.adobe_btn.config(state="disabled", bg="#4a4a6a")
+        self._disable_btn(self.adobe_btn)
         self._log("\n☁ Adobe Stock アップロード開始（ブラウザ直接アップロード）...", "info")
 
         # ベクター EPS ファイルと CSV も準備
@@ -948,7 +1018,7 @@ class StockTaggerApp:
                     progress_callback=log,
                     headless=False,
                     files=targets,
-                    confirm_submit_callback=lambda: True,
+                    confirm_submit_callback=lambda: not self.test_mode,
                 )
                 log(f"[OK] ポータル提出完了: {portal_result['submitted']}件")
 
@@ -960,7 +1030,7 @@ class StockTaggerApp:
                         progress_callback=log,
                         headless=False,
                         files=vector_eps,
-                        confirm_submit_callback=lambda: True,
+                        confirm_submit_callback=lambda: not self.test_mode,
                     )
                     log(f"[OK] Adobe Vector 提出完了: {vec_result['submitted']}件")
                 elif vector_eps:
@@ -968,13 +1038,13 @@ class StockTaggerApp:
 
                 def on_adobe_done():
                     self._log("\n✓ 工程2 Adobe 完了！", "success")
-                    self.adobe_btn.config(state="normal", bg="#1a6fa8")
+                    self._enable_btn(self.adobe_btn, bg="#1a6fa8")
                     self._show_topmost_popup("工程2 完了", "Adobe Stock アップロード完了！")
                 self.root.after(0, on_adobe_done)
             except Exception as e:
                 def on_adobe_err(err=str(e)):
                     self._log(f"\n[NG] Adobeエラー: {err}", "error")
-                    self.adobe_btn.config(state="normal", bg="#1a6fa8")
+                    self._enable_btn(self.adobe_btn, bg="#1a6fa8")
                     self._show_topmost_popup("工程2 エラー", f"Adobeエラー:\n{err}", error=True)
                 self.root.after(0, on_adobe_err)
 
@@ -1020,7 +1090,7 @@ class StockTaggerApp:
             key=lambda f: f.stat().st_mtime, reverse=True
         )
 
-        self.ss_btn.config(state="disabled", bg="#4a4a6a")
+        self._disable_btn(self.ss_btn)
         self._log(f"\n☁ Shutterstock ブラウザアップロード開始... ({len(ss_targets)}件)", "info")
 
         def run():
@@ -1031,6 +1101,7 @@ class StockTaggerApp:
                     files=ss_targets,
                     progress_callback=log,
                     headless=False,
+                    skip_submit=self.test_mode,
                 )
                 log(f"[OK] Shutterstock ポータル提出完了！")
                 if portal_result["errors"]:
@@ -1045,6 +1116,7 @@ class StockTaggerApp:
                         files=vector_eps_ss,
                         progress_callback=log,
                         headless=False,
+                        skip_submit=self.test_mode,
                     )
                     log(f"[OK] Shutterstock Vector 提出完了: {vec_ss['submitted']}件")
                 elif vector_eps_ss:
@@ -1052,14 +1124,14 @@ class StockTaggerApp:
 
                 def on_done():
                     self._log("\n✓ 工程3 Shutterstock 完了！", "success")
-                    self.ss_btn.config(state="normal", bg="#cc5500")
+                    self._enable_btn(self.ss_btn, bg="#cc5500")
                     self._show_topmost_popup("工程3 完了", "Shutterstock アップロード完了！")
                 self.root.after(0, on_done)
 
             except Exception as e:
                 def on_ss_err(err=str(e)):
                     self._log(f"\n[NG] エラー: {err}", "error")
-                    self.ss_btn.config(state="normal", bg="#cc5500")
+                    self._enable_btn(self.ss_btn, bg="#cc5500")
                     self._show_topmost_popup("工程3 エラー", f"Shutterstockエラー:\n{err}", error=True)
                 self.root.after(0, on_ss_err)
 
@@ -1095,7 +1167,7 @@ class StockTaggerApp:
 
         vector_results = getattr(self, 'last_vector_results', [])
 
-        self.pixta_btn.config(state="disabled", bg="#4a4a6a")
+        self._disable_btn(self.pixta_btn)
         self._log(
             f"\n🌸 Pixta アップロード開始（画像:{len(image_targets)}件 / 動画:{len(video_targets)}件 / Vector:{len(vector_results)}件）...",
             "info"
@@ -1106,7 +1178,7 @@ class StockTaggerApp:
             try:
                 if image_targets:
                     log(f"画像アップロード: {len(image_targets)}件...")
-                    img_result = pixta_upload(files=image_targets, progress_callback=log)
+                    img_result = pixta_upload(files=image_targets, progress_callback=log, skip_submit=self.test_mode)
                     log(f"[OK] 画像完了: アップロード{img_result['uploaded']}件 / 審査申請{img_result['submitted']}件")
 
                 if video_targets:
@@ -1123,7 +1195,7 @@ class StockTaggerApp:
                             "tags": [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50],
                         })
                         log(f"  解析完了: タイトル={title[:40]} / タグ{len(video_metadata[-1]['tags'])}件")
-                    vid_result = run_footage_upload(files=video_targets, metadata=video_metadata, progress_callback=log)
+                    vid_result = run_footage_upload(files=video_targets, metadata=video_metadata, progress_callback=log, skip_submit=self.test_mode)
                     log(f"[OK] 動画完了: アップロード{vid_result['uploaded']}件 / 審査申請{vid_result['submitted']}件")
 
                 if vector_results:
@@ -1131,20 +1203,20 @@ class StockTaggerApp:
                     vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
                     if vector_zips:
                         log(f"🌸 Pixta Vector ZIP アップロード: {len(vector_zips)}件...")
-                        vec_result = pixta_upload(files=vector_zips, progress_callback=log)
+                        vec_result = pixta_upload(files=vector_zips, progress_callback=log, skip_submit=self.test_mode)
                         log(f"[OK] Vector完了: アップロード{vec_result['uploaded']}件 / 審査申請{vec_result['submitted']}件")
                     else:
                         log("[!] Vector ZIP作成に失敗しました。")
 
                 def on_pixta_done():
                     self._log("\n✓ 工程4 Pixta 完了！", "success")
-                    self.pixta_btn.config(state="normal", bg="#b5338a")
+                    self._enable_btn(self.pixta_btn, bg="#b5338a")
                     self._show_topmost_popup("工程4 完了", "Pixta アップロード完了！")
                 self.root.after(0, on_pixta_done)
             except Exception as e:
                 def on_pixta_err(err=str(e)):
                     self._log(f"\n[NG] Pixtaエラー: {err}", "error")
-                    self.pixta_btn.config(state="normal", bg="#b5338a")
+                    self._enable_btn(self.pixta_btn, bg="#b5338a")
                     self._show_topmost_popup("工程4 エラー", f"Pixtaエラー:\n{err}", error=True)
                 self.root.after(0, on_pixta_err)
 
@@ -1172,7 +1244,7 @@ class StockTaggerApp:
 
         move_folder = self.last_folder if self.last_folder else folder
 
-        self.move_btn.config(state="disabled", bg="#4a4a6a")
+        self._disable_btn(self.move_btn)
         self._log("\n📦 ファイル移動中...", "info")
 
         def run_move():
@@ -1198,12 +1270,12 @@ class StockTaggerApp:
                         self._log(f"  Vectorフォルダ移動失敗: {', '.join(vec_move['errors'])}", "error")
                     self.last_results = []
                     self.last_folder = ""
-                    self.move_btn.config(state="normal", bg="#0f3460")
+                    self._enable_btn(self.move_btn, bg="#0f3460")
                 self.root.after(0, on_done)
             except Exception as e:
                 self.root.after(0, lambda err=str(e): (
                     self._log(f"✗ エラー: {err}", "error"),
-                    self.move_btn.config(state="normal", bg="#0f3460")
+                    self._enable_btn(self.move_btn, bg="#0f3460")
                 ))
 
         threading.Thread(target=run_move, daemon=True).start()

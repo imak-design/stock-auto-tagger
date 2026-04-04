@@ -5,7 +5,6 @@ Pixta contributor login & session save.
 Run once to create pixta_session.json.
 """
 
-import time
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 
@@ -30,26 +29,17 @@ def save_session():
 
         page = context.new_page()
 
-        print("Opening Pixta login page...")
-        print("Please log in to your Pixta account in the browser.")
-        print("Waiting for login (up to 3 minutes)...")
+        print("Pixtaのログインページを開きます...")
+        print("ブラウザでPixtaアカウントにログインしてください。")
         page.goto(LOGIN_URL)
 
-        for _ in range(360):
-            url = page.url
-            if "pixta.jp/mypage" in url:
-                break
-            time.sleep(0.5)
-        else:
-            print("Timeout: Login did not complete.")
-            context.close()
-            return
+        input("\nログインが完了したら、ここでEnterキーを押してください...")
 
-        time.sleep(2)
-
+        # セッション保存
         context.storage_state(path=str(SESSION_FILE))
-        print(f"Session saved: {SESSION_FILE}")
+        print(f"セッションを保存しました: {SESSION_FILE}")
 
+        # ブラウザを閉じる
         context.close()
 
 

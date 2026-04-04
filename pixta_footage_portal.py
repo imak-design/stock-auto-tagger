@@ -35,6 +35,7 @@ def run_footage_upload(
     files: list,
     metadata: list,
     progress_callback=None,
+    skip_submit: bool = False,
 ) -> dict:
     """
     Pixta 動画アップロード → タイトル/タグ入力 → 審査申請 を全自動で実行する。
@@ -244,6 +245,12 @@ def run_footage_upload(
             # -------------------------------------------------------
             # Phase 3: 審査申請
             # -------------------------------------------------------
+            if skip_submit:
+                log("[テストモード] 審査申請をスキップしました。")
+                context.close()
+                browser.close()
+                return {"uploaded": uploaded, "submitted": 0, "errors": errors}
+
             log("Selecting all items for submission...")
             all_cb = page.locator("#all-1")
             all_cb.wait_for(state="visible", timeout=10000)

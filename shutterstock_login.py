@@ -5,7 +5,6 @@ Shutterstock コントリビューターポータル ログイン & セッショ
 初回のみ実行してください。
 """
 
-import time
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 
@@ -31,25 +30,15 @@ def save_session():
 
         print("Shutterstockコントリビューターポータルを開きます...")
         print("ブラウザでShutterstockアカウントにログインしてください。")
-        print("ログイン完了を自動検出します（最大3分待機）。")
         page.goto(PORTAL_URL)
 
-        # ログイン完了まで待機（submit.shutterstock.com に到達するまでポーリング）
-        for _ in range(360):
-            url = page.url
-            if "submit.shutterstock.com" in url and "login" not in url:
-                break
-            time.sleep(0.5)
-        else:
-            print("タイムアウト: ログインが完了しませんでした。")
-            context.close()
-            return
+        input("\nログインが完了したら、ここでEnterキーを押してください...")
 
-        time.sleep(2)
-
+        # セッション保存
         context.storage_state(path=str(SESSION_FILE))
         print(f"セッションを保存しました: {SESSION_FILE}")
 
+        # ブラウザを閉じる
         context.close()
 
 if __name__ == "__main__":

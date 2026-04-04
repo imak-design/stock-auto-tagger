@@ -76,8 +76,9 @@ def load_config() -> dict:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
     else:
-        config = {"api_key": "", "input_folder": "", "variation_folder": "", "backup_folder": ""}
-    config["api_key"] = os.environ.get("GEMINI_API_KEY", config.get("api_key", ""))
+        config = {"input_folder": "", "variation_folder": "", "backup_folder": ""}
+    # APIキーは.envからのみ読み込む（config.jsonには保存しない）
+    config["api_key"] = os.environ.get("GEMINI_API_KEY", "")
     return config
 
 
@@ -101,17 +102,19 @@ VIDEO_PROMPT = _load_prompt("video_prompt.txt")
 # ============================================================
 
 GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
-def call_gemini_api(api_key: str, payload: dict) -> str:
+def call_gemini_api(api_key: str, payload: dict, model: str = None) -> str:
     """Gemini APIを直接呼び出してテキストを返す（429/5xx時は指数バックオフでリトライ）"""
     import urllib.request
     import urllib.error
 
-    url = f"{GEMINI_API_BASE}/{GEMINI_MODEL}:generateContent?key={api_key}"
+    use_model = model or GEMINI_MODEL
+    url = f"{GEMINI_API_BASE}/{use_model}:generateContent?key={api_key}"
     data = json.dumps(payload).encode("utf-8")
 
-    for attempt in range(4):
+    for attempt in range(7):
         req = urllib.request.Request(
             url,
             data=data,
@@ -121,10 +124,11 @@ def call_gemini_api(api_key: str, payload: dict) -> str:
         try:
             with urllib.request.urlopen(req) as res:
                 result = json.loads(res.read().decode("utf-8"))
+            time.sleep(6)  # レート制限対策: 無料枠10RPMに収まるよう6秒間隔
             return result["candidates"][0]["content"]["parts"][0]["text"]
         except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 502, 503) and attempt < 3:
-                wait = 2 ** attempt
+            if e.code in (429, 500, 502, 503) and attempt < 6:
+                wait = min(2 ** attempt * 2, 60)
                 time.sleep(wait)
                 continue
             raise
@@ -826,7 +830,7 @@ def _rename_get_keyword(api_key: str, images_data: list) -> str:
         "Provide a single English keyword (lowercase, no spaces) describing the visual style "
         "(e.g. 'lightstreak', 'lightswoosh', 'starburst'). Reply with ONLY the keyword."
     )})
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}).strip().lower()
+    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
 
 
 def _rename_get_color(api_key: str, mime: str, data: str) -> str:
@@ -840,7 +844,7 @@ def _rename_get_color(api_key: str, mime: str, data: str) -> str:
             "Reply with ONLY the color name."
         )}
     ]
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}).strip().lower()
+    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
 
 
 def _rename_video_keyword(api_key: str, file_uri: str, mime_type: str) -> str:
@@ -852,7 +856,7 @@ def _rename_video_keyword(api_key: str, file_uri: str, mime_type: str) -> str:
             "Reply with ONLY the keyword."
         )}
     ]
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}).strip().lower()
+    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
 
 
 def _rename_video_color(api_key: str, file_uri: str, mime_type: str) -> str:
@@ -866,7 +870,7 @@ def _rename_video_color(api_key: str, file_uri: str, mime_type: str) -> str:
             "Reply with ONLY the color name."
         )}
     ]
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}).strip().lower()
+    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
 
 
 def rename_variation_folders(api_key: str, output_folder: str, variation_base: str = None,

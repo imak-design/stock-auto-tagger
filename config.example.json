@@ -2,5 +2,6 @@
   "input_folder": "",
   "variation_folder": "",
   "backup_folder": "",
-  "enabled_sites": ["adobe", "shutterstock", "pixta"]
+  "enabled_sites": ["adobe", "shutterstock", "pixta"],
+  "test_mode": false
 }

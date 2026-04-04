@@ -44,7 +44,7 @@ def _select_all(page, log):
 
 
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
-                          files: list = None, expected_count: int = 0):
+                          files: list = None, expected_count: int = 0, skip_submit: bool = False):
     def log(msg: str):
         if progress_callback:
             progress_callback(msg)
@@ -129,7 +129,24 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         log("  まだ準備中... 30秒待機")
                         time.sleep(30)
                 else:
-                    log("[!] アップロード確認タイムアウト。続行します...")
+                    log("[!] アップロード確認タイムアウト。再待機します...")
+                    for retry in range(6):
+                        time.sleep(30)
+                        page.reload(wait_until="domcontentloaded", timeout=30000)
+                        time.sleep(4)
+                        _close_popups(page)
+                        try:
+                            tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
+                            match = re.search(r'\((\d+)\)', tab_text)
+                            current = int(match.group(1)) if match else 0
+                            if current >= expected:
+                                log(f"  再待機で反映確認: {current}件")
+                                break
+                            log(f"  ...再待機 {(retry+1)*30}秒, 現在{current}/{expected}件")
+                        except Exception:
+                            pass
+                    else:
+                        log(f"[!] 再待機タイムアウト: {current}/{expected}件で続行します")
 
             # ============================================================
             # STEP 3: 全ファイルを選択
@@ -203,6 +220,11 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # ============================================================
             # STEP 5: 画像を審査提出
             # ============================================================
+            if skip_submit:
+                log("[テストモード] 審査提出をスキップしました。")
+                context.close()
+                return {"submitted": 0, "errors": errors}
+
             log("画像: 審査提出中...")
             submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
             try:

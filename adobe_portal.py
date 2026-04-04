@@ -171,12 +171,33 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 else:
                     log("[!] タイムアウト: 処理を続行します。")
 
-            # アップロード件数を確認
+            # アップロード件数を確認・比較
             data = page.evaluate("() => window.__react_context__")
             content = data.get("reduxState", {}).get("content", [])
-            log(f"アップロード済みファイル: {len(content)}件")
+            actual_new = len(content) - initial_count if files else len(content)
+            log(f"アップロード済みファイル: {len(content)}件（新規 {actual_new}件）")
             for item in content:
                 log(f"  {item.get('originalName', '?')} (status={item.get('status', '?')})")
+
+            if files and actual_new < len(files):
+                missing = len(files) - actual_new
+                log(f"[!] 警告: {missing}件が未反映。再待機します...")
+                for i in range(30):
+                    time.sleep(10)
+                    try:
+                        page.reload(wait_until="domcontentloaded", timeout=30000)
+                        time.sleep(4)
+                        data = page.evaluate("() => window.__react_context__")
+                        content = data.get("reduxState", {}).get("content", [])
+                        actual_new = len(content) - initial_count
+                        if actual_new >= len(files):
+                            log(f"反映確認: {actual_new}件（全件反映）")
+                            break
+                        log(f"  ...再待機 {(i+1)*10}秒, 現在{actual_new}/{len(files)}件")
+                    except Exception:
+                        pass
+                else:
+                    log(f"[!] 再待機タイムアウト: {actual_new}/{len(files)}件で続行します")
 
             # --- Step1: CSV アップロードでメタデータを一括適用 --------
             log("\n>> CSV アップロード開始...")

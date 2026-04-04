@@ -31,7 +31,7 @@ def _launch(p):
     return browser, context
 
 
-def run_upload_and_submit(files: list, progress_callback=None) -> dict:
+def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool = False) -> dict:
     """
     Pixta イラストアップロード → 審査申請 を全自動で実行する。
 
@@ -178,12 +178,30 @@ def run_upload_and_submit(files: list, progress_callback=None) -> dict:
                     log(f"  ...waiting for list update ({i}s, current: {items_now})")
             else:
                 items_now = page.locator("input.submit_items").count()
-                log(f"[!] Expected {items_before + len(files)} items, got {items_now}. Continuing...")
+                expected_total = items_before + len(files)
+                log(f"[!] Expected {expected_total} items, got {items_now}. 再待機します...")
+                for retry in range(12):
+                    time.sleep(10)
+                    page.reload(wait_until="domcontentloaded", timeout=30000)
+                    time.sleep(3)
+                    items_now = page.locator("input.submit_items").count()
+                    if items_now >= expected_total:
+                        log(f"再待機で反映確認: {items_now}件")
+                        break
+                    log(f"  ...再待機 {(retry+1)*10}秒, 現在{items_now}/{expected_total}件")
+                else:
+                    log(f"[!] 再待機タイムアウト: {items_now}/{expected_total}件で続行します")
                 uploaded = len(files)
 
             # -------------------------------------------------------
             # Phase 2: 審査申請
             # -------------------------------------------------------
+            if skip_submit:
+                log("[テストモード] 審査申請をスキップしました。")
+                context.close()
+                browser.close()
+                return {"uploaded": uploaded, "submitted": 0, "errors": errors}
+
             log("Selecting all items for submission...")
             all_cb = page.locator("#all-1")
             all_cb.wait_for(state="visible", timeout=10000)
