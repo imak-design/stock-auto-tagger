@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Auto Tagger - マニュアル</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+  line-height: 1.7;
+  padding: 0 0 60px;
+}
+a { color: #64ffda; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Header */
+.header {
+  background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 50%, #e94560 100%);
+  padding: 50px 20px 40px;
+  text-align: center;
+}
+.header h1 { font-size: 2.2rem; color: #fff; margin-bottom: 8px; }
+.header p { color: #ccc; font-size: 1.05rem; }
+
+/* Container */
+.container { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+
+/* Section */
+section { margin-top: 48px; }
+section > h2 {
+  font-size: 1.5rem;
+  color: #64ffda;
+  border-bottom: 2px solid #0f3460;
+  padding-bottom: 8px;
+  margin-bottom: 20px;
+}
+h3 { color: #e94560; margin: 24px 0 12px; font-size: 1.15rem; }
+h4 { color: #8892b0; margin: 16px 0 8px; font-size: 1rem; }
+
+/* Card */
+.card {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.4);
+}
+.card-sm {
+  background: #1a1a2e;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.3);
+}
+
+/* Table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: .95rem;
+}
+th {
+  background: #0f3460;
+  color: #fff;
+  padding: 10px 14px;
+  text-align: left;
+  font-weight: 600;
+}
+td { padding: 10px 14px; border-bottom: 1px solid #2a2a4a; }
+tr:hover td { background: #22223a; }
+.center { text-align: center; }
+
+/* Code */
+code {
+  background: #0f0f23;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: .9em;
+  color: #64ffda;
+}
+pre {
+  background: #0f0f23;
+  border-radius: 8px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  margin: 12px 0 16px;
+  line-height: 1.5;
+}
+pre code { background: none; padding: 0; color: #e0e0e0; }
+
+/* Flow */
+.flow { display: flex; flex-direction: column; align-items: center; gap: 0; margin: 20px 0; }
+.flow-step {
+  width: 100%;
+  max-width: 520px;
+  padding: 14px 20px;
+  border-radius: 10px;
+  text-align: center;
+  font-weight: 600;
+  font-size: .95rem;
+}
+.flow-arrow { color: #8892b0; font-size: 1.4rem; line-height: 1; padding: 2px 0; }
+.step-ai { background: #1b3a4b; border: 1px solid #2d6a8f; color: #7ec8e3; }
+.step-upload { background: #2a1a3e; border: 1px solid #6b3fa0; color: #c49bff; }
+.step-submit { background: #3a1a1a; border: 1px solid #a03f3f; color: #ff9b9b; }
+.step-file { background: #1a2e1a; border: 1px solid #3fa03f; color: #9bffb0; }
+.step-test { background: #3a3a1a; border: 1px solid #a0a03f; color: #ffff9b; }
+
+/* Badge */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: .8rem;
+  font-weight: 600;
+}
+.badge-mac { background: #1b3a4b; color: #7ec8e3; }
+.badge-win { background: #2a1a3e; color: #c49bff; }
+.badge-both { background: #1a2e1a; color: #9bffb0; }
+
+/* List */
+ul, ol { margin: 8px 0 16px 24px; }
+li { margin-bottom: 6px; }
+
+/* Alert */
+.alert {
+  border-left: 4px solid #e94560;
+  background: #2a1a2a;
+  padding: 14px 18px;
+  border-radius: 0 8px 8px 0;
+  margin: 16px 0;
+  font-size: .95rem;
+}
+.alert-info {
+  border-left-color: #64ffda;
+  background: #1a2a2e;
+}
+
+/* Two columns */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) {
+  .cols { grid-template-columns: 1fr; }
+  .header h1 { font-size: 1.6rem; }
+  table { font-size: .85rem; }
+  th, td { padding: 8px 10px; }
+}
+
+/* TOC */
+.toc {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 24px 28px;
+  margin-top: 32px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.4);
+}
+.toc h3 { color: #64ffda; margin: 0 0 12px; }
+.toc ol { margin: 0 0 0 20px; }
+.toc li { margin-bottom: 4px; }
+.toc a { color: #e0e0e0; }
+.toc a:hover { color: #64ffda; }
+
+.sub { color: #8892b0; font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Stock Auto Tagger</h1>
+  <p>Gemini AI + Playwright で 3 サイトへタグ自動生成 & ブラウザアップロード</p>
+</div>
+
+<div class="container">
+
+<!-- TOC -->
+<nav class="toc">
+  <h3>目次</h3>
+  <ol>
+    <li><a href="#overview">システム概要</a></li>
+    <li><a href="#flow">処理フロー</a></li>
+    <li><a href="#files">ファイル構成</a></li>
+    <li><a href="#setup">セットアップ</a></li>
+    <li><a href="#apikey">API キーの設定</a></li>
+    <li><a href="#login">サイトログイン</a></li>
+    <li><a href="#usage">使い方</a></li>
+    <li><a href="#folders">フォルダ構成と振り分け</a></li>
+    <li><a href="#testmode">テストモード</a></li>
+    <li><a href="#customize">カスタマイズ</a></li>
+    <li><a href="#trouble">トラブルシューティング</a></li>
+    <li><a href="#tech">技術スタック・料金</a></li>
+  </ol>
+</nav>
+
+<!-- 1. Overview -->
+<section id="overview">
+  <h2>1. システム概要</h2>
+  <div class="card">
+    <p>ストック素材（画像・動画・ベクター EPS）を <strong>3 つのストックフォトサイト</strong>に一括登録するための自動化ツールです。</p>
+    <ul style="margin-top:12px">
+      <li><strong>Gemini AI</strong> で画像・動画を解析し、英語/日本語のタイトル・キーワード・カテゴリを自動生成</li>
+      <li><strong>Playwright</strong> でブラウザを自動操作し、ファイルアップロード → メタデータ適用 → 審査提出まで全自動</li>
+      <li>GUI（Tkinter）でボタンを押すだけで操作可能</li>
+    </ul>
+  </div>
+
+  <h3>対応サイトとファイル形式</h3>
+  <table>
+    <tr><th>サイト</th><th class="center">画像</th><th class="center">動画</th><th class="center">ベクター</th></tr>
+    <tr><td>Adobe Stock</td><td class="center">JPG / PNG</td><td class="center">MP4 / MOV</td><td class="center">EPS</td></tr>
+    <tr><td>Shutterstock</td><td class="center">JPG</td><td class="center">MP4 / MOV</td><td class="center">EPS</td></tr>
+    <tr><td>Pixta</td><td class="center">JPG / PNG</td><td class="center">MP4 / MOV</td><td class="center">ZIP (EPS+PNG)</td></tr>
+  </table>
+  <p class="sub">※ Shutterstock は PNG 非対応のため、JPG と動画のみアップロードされます。</p>
+</section>
+
+<!-- 2. Flow -->
+<section id="flow">
+  <h2>2. 処理フロー</h2>
+
+  <h3>一気通貫モード（工程0）</h3>
+  <div class="flow">
+    <div class="flow-step step-file">バリエーションリネーム<br><span class="sub">Gemini Flash-Lite で色名判定</span></div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-ai">工程1: Gemini AI 解析 → CSV / メタデータ生成<br><span class="sub">画像・動画・ベクター・写真・AI 全素材を一括解析</span></div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-upload">工程2: Adobe Stock アップロード<br><span class="sub">通常画像 → AI素材 → ベクター → 写真の順</span></div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-upload">工程3: Shutterstock アップロード<br><span class="sub">画像 → ベクター → 写真 → 動画タブ</span></div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-upload">工程4: Pixta アップロード<br><span class="sub">画像 → 動画 → ベクター(ZIP) → AI → 写真</span></div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-file">工程5: ファイル移動<br><span class="sub">処理済みファイルをアーカイブへ</span></div>
+  </div>
+
+  <h3>個別実行</h3>
+  <p>各工程のボタンを個別に押して、必要な処理だけを実行することもできます。</p>
+  <table>
+    <tr><th>ボタン</th><th>処理内容</th></tr>
+    <tr><td><strong>工程0</strong></td><td>リネーム → 工程1〜5 を全自動実行</td></tr>
+    <tr><td><strong>工程1</strong></td><td>Gemini 解析 → CSV 生成 → メタデータ埋込</td></tr>
+    <tr><td><strong>工程2</strong></td><td>Adobe Stock にアップロード → 審査提出</td></tr>
+    <tr><td><strong>工程3</strong></td><td>Shutterstock にアップロード → 審査提出</td></tr>
+    <tr><td><strong>工程4</strong></td><td>Pixta に画像 + 動画 + Vector アップロード → 審査申請</td></tr>
+    <tr><td><strong>工程5</strong></td><td>処理済みファイルをアーカイブフォルダへ移動</td></tr>
+  </table>
+</section>
+
+<!-- 3. Files -->
+<section id="files">
+  <h2>3. ファイル構成</h2>
+  <table>
+    <tr><th>ファイル</th><th>説明</th></tr>
+    <tr><td><code>app.py</code></td><td>GUI アプリケーション（メインエントリ）</td></tr>
+    <tr><td><code>stock_tagger.py</code></td><td>Gemini AI 解析・CSV 生成・メタデータ埋込</td></tr>
+    <tr><td><code>adobe_portal.py</code></td><td>Adobe Stock ブラウザ自動化</td></tr>
+    <tr><td><code>shutterstock_portal.py</code></td><td>Shutterstock ブラウザ自動化</td></tr>
+    <tr><td><code>pixta_portal.py</code></td><td>Pixta 画像ブラウザ自動化</td></tr>
+    <tr><td><code>pixta_footage_portal.py</code></td><td>Pixta 動画ブラウザ自動化</td></tr>
+    <tr><td><code>*_login.py</code></td><td>各サイトのログイン・セッション保存</td></tr>
+    <tr><td><code>prompts/</code></td><td>Gemini AI 用プロンプト（テキスト編集でカスタマイズ可）</td></tr>
+    <tr><td><code>config.example.json</code></td><td>設定ファイルのテンプレート</td></tr>
+    <tr><td><code>requirements.txt</code></td><td>Python 依存パッケージ一覧</td></tr>
+    <tr><td><code>起動する.bat</code></td><td>Windows 用起動スクリプト</td></tr>
+    <tr><td><code>起動.command</code></td><td>Mac 用起動スクリプト</td></tr>
+  </table>
+</section>
+
+<!-- 4. Setup -->
+<section id="setup">
+  <h2>4. セットアップ</h2>
+
+  <h3>Step 1: Python のインストール</h3>
+  <div class="cols">
+    <div class="card-sm">
+      <h4><span class="badge badge-mac">Mac</span></h4>
+      <pre><code># Homebrew をインストール（まだの場合）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Python をインストール
+brew install python</code></pre>
+    </div>
+    <div class="card-sm">
+      <h4><span class="badge badge-win">Windows</span></h4>
+      <p><a href="https://www.python.org/downloads/">python.org</a> からインストーラーをダウンロード。<br>
+      インストール時に <strong>「Add Python to PATH」にチェック</strong> を入れてください。</p>
+    </div>
+  </div>
+
+  <h3>Step 2: Git のインストール（Windows のみ）</h3>
+  <div class="card-sm">
+    <p><a href="https://git-scm.com/downloads/win">git-scm.com</a> からインストーラーをダウンロードし、デフォルト設定のままインストール。</p>
+    <p class="sub">Git を入れたくない場合は、GitHub ページの緑色の「Code」ボタン → 「Download ZIP」からダウンロードしてください。</p>
+  </div>
+
+  <h3>Step 3: リポジトリのダウンロード</h3>
+  <pre><code>git clone https://github.com/imak-design/stock-auto-tagger.git
+cd stock-auto-tagger</code></pre>
+
+  <h3>Step 4: 依存パッケージのインストール</h3>
+  <div class="cols">
+    <div class="card-sm">
+      <h4><span class="badge badge-mac">Mac</span></h4>
+      <pre><code>python3 -m venv venv
+source venv/bin/activate
+pip3 install -r requirements.txt
+brew install python-tk@3.14
+playwright install chromium</code></pre>
+    </div>
+    <div class="card-sm">
+      <h4><span class="badge badge-win">Windows</span></h4>
+      <pre><code>pip install -r requirements.txt
+playwright install chromium</code></pre>
+    </div>
+  </div>
+
+  <h3>Step 5: 設定ファイルを作成</h3>
+  <pre><code>cp config.example.json config.json</code></pre>
+  <p><code>config.json</code> を開いて設定を入力：</p>
+  <pre><code>{
+  "input_folder": "/Users/あなた/Desktop/stock_input",
+  "variation_folder": "",
+  "backup_folder": "",
+  "enabled_sites": ["adobe", "shutterstock", "pixta"]
+}</code></pre>
+  <table>
+    <tr><th>項目</th><th>説明</th></tr>
+    <tr><td><code>input_folder</code></td><td>素材を置くフォルダ（JPG/PNG/MP4 を入れる）</td></tr>
+    <tr><td><code>variation_folder</code></td><td>バリエーション素材フォルダ（工程0用、不要なら空欄）</td></tr>
+    <tr><td><code>backup_folder</code></td><td>バックアップ先（不要なら空欄）</td></tr>
+    <tr><td><code>enabled_sites</code></td><td>アップロードするサイト（不要なサイトを配列から削除）</td></tr>
+    <tr><td><code>test_mode</code></td><td><code>true</code> で審査申請をスキップ（GUI からも切替可）</td></tr>
+  </table>
+</section>
+
+<!-- 5. API Key -->
+<section id="apikey">
+  <h2>5. API キーの設定</h2>
+  <div class="card">
+    <div class="alert-info alert">
+      API キーはプロジェクトフォルダの<strong>外</strong>に保存します。フォルダを共有しても API キーが漏れる心配がありません。
+    </div>
+    <table>
+      <tr><th>OS</th><th>保存先パス</th></tr>
+      <tr><td>Mac</td><td><code>~/.stock-auto-tagger/.env</code></td></tr>
+      <tr><td>Windows</td><td><code>C:\Users\ユーザー名\.stock-auto-tagger\.env</code></td></tr>
+    </table>
+    <p><code>.env</code> ファイルの中身：</p>
+    <pre><code>GEMINI_API_KEY=あなたのAPIキー</code></pre>
+  </div>
+
+  <h3>作成コマンド</h3>
+  <div class="cols">
+    <div class="card-sm">
+      <h4><span class="badge badge-mac">Mac</span></h4>
+      <pre><code>mkdir -p ~/.stock-auto-tagger
+echo "GEMINI_API_KEY=ここにキーを貼付" > ~/.stock-auto-tagger/.env</code></pre>
+      <p class="sub">編集: <code>open -e ~/.stock-auto-tagger/.env</code></p>
+    </div>
+    <div class="card-sm">
+      <h4><span class="badge badge-win">Windows</span></h4>
+      <pre><code>mkdir %USERPROFILE%\.stock-auto-tagger
+echo GEMINI_API_KEY=ここにキーを貼付 > %USERPROFILE%\.stock-auto-tagger\.env</code></pre>
+      <p class="sub">編集: <code>notepad %USERPROFILE%\.stock-auto-tagger\.env</code></p>
+    </div>
+  </div>
+
+  <h3>API キーの取得</h3>
+  <p><a href="https://aistudio.google.com/apikey">Google AI Studio</a> で無料取得できます。</p>
+
+  <h3>無料枠の目安（Gemini 2.5 Flash）</h3>
+  <div class="card-sm">
+    <p>無料 API キーは <strong>1日25リクエスト</strong>（1分5リクエスト）の上限があります。画像1枚 = 1リクエスト。</p>
+    <table>
+      <tr><th>モード</th><th>1日あたり</th></tr>
+      <tr><td>工程1のみ（タグ生成）</td><td>約 20 枚</td></tr>
+      <tr><td>工程0（リネーム + タグ生成）</td><td>約 10 枚</td></tr>
+    </table>
+    <p class="sub">上限は太平洋時間の深夜0時（日本時間 17:00）にリセットされます。</p>
+  </div>
+
+  <div class="alert">
+    <strong>API キーの取り扱い注意</strong>
+    <ul>
+      <li>API キーは必ず上記の <code>.env</code> ファイルに書いてください</li>
+      <li><code>config.json</code> など他のファイルには書かないでください</li>
+      <li>AI チャットに API キーを貼り付けると会話ログに残る可能性があります</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6. Login -->
+<section id="login">
+  <h2>6. サイトログイン</h2>
+  <div class="card">
+    <p>使いたいサイトだけ実行してください。ブラウザが開くので手動でログインすると、セッションが自動保存されます。</p>
+    <pre><code>python adobe_login.py        # Adobe Stock
+python shutterstock_login.py  # Shutterstock
+python pixta_login.py         # Pixta</code></pre>
+    <p class="sub">セッションが切れた場合は再度実行してください。</p>
+  </div>
+</section>
+
+<!-- 7. Usage -->
+<section id="usage">
+  <h2>7. 使い方</h2>
+
+  <h3>アプリの起動</h3>
+  <div class="cols">
+    <div class="card-sm">
+      <h4><span class="badge badge-win">Windows</span></h4>
+      <p><code>起動する.bat</code> をダブルクリック</p>
+    </div>
+    <div class="card-sm">
+      <h4><span class="badge badge-mac">Mac</span></h4>
+      <p>初回のみ: <code>chmod +x 起動.command</code><br>
+      その後 <code>起動.command</code> をダブルクリック</p>
+    </div>
+  </div>
+  <p class="sub">またはターミナルから <code>python app.py</code> で起動。</p>
+
+  <h3>基本的な流れ</h3>
+  <div class="flow">
+    <div class="flow-step step-file">1. <code>input_folder</code> に素材ファイルを入れる</div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-ai">2. 工程1: AI がタグ・タイトルを自動生成</div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-upload">3. 工程2〜4: 各サイトにアップロード</div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-step step-file">4. 工程5: 処理済みファイルを移動</div>
+  </div>
+  <p>または <strong>工程0</strong> で全工程を一気通貫実行できます。</p>
+</section>
+
+<!-- 8. Folders -->
+<section id="folders">
+  <h2>8. フォルダ構成と振り分け</h2>
+  <div class="card">
+    <pre><code>input_folder/
+├── image1.jpg            ← 通常素材
+├── image2.png
+├── video1.mp4
+├── AI/                   ← AI 生成素材
+│   └── ai_image.png
+├── Photo/                ← 写真素材
+│   └── DSC01234.jpg
+├── Vector/               ← ベクター素材
+│   └── 260402_icon/
+│       ├── 260402_icon.eps
+│       └── 260402_icon.png
+└── csv_output/           ← CSV 自動出力（自動作成）</code></pre>
+  </div>
+
+  <h3>AI / Photo フォルダによる自動振り分け</h3>
+  <table>
+    <tr><th>フォルダ</th><th>Adobe Stock</th><th>Shutterstock</th><th>Pixta</th></tr>
+    <tr><td>通常（直下）</td><td class="center">イラスト</td><td class="center">通常</td><td class="center">イラストページ</td></tr>
+    <tr><td><code>Photo/</code></td><td class="center">写真カテゴリ</td><td class="center">通常</td><td class="center">写真ページ</td></tr>
+    <tr><td><code>AI/</code></td><td class="center">イラスト + AI チェック</td><td class="center">対象外</td><td class="center">イラスト + AI チェック</td></tr>
+  </table>
+  <p class="sub">フォルダがなければ全ファイルが通常素材として処理されます。Shutterstock は AI 作品登録不可のため AI フォルダは除外されます。</p>
+</section>
+
+<!-- 9. Test Mode -->
+<section id="testmode">
+  <h2>9. テストモード</h2>
+  <div class="card">
+    <p>GUI の「テストモード」チェックボックスを ON にすると、各サイトで <strong>審査申請の手前で処理が停止</strong> します。</p>
+
+    <table>
+      <tr><th>サイト</th><th>停止位置</th></tr>
+      <tr><td>Adobe Stock</td><td>CSV 適用 → コンテンツタイプ設定 → 全選択完了 → <strong>「審査に登録」ボタン手前</strong></td></tr>
+      <tr><td>Shutterstock</td><td>CSV 適用完了 → <strong>提出ボタン手前</strong></td></tr>
+      <tr><td>Pixta</td><td>AI チェック → 全選択完了 → <strong>「選択した作品を登録」ボタン手前</strong></td></tr>
+    </table>
+
+    <div class="flow" style="margin-top:16px">
+      <div class="flow-step step-upload">処理完了 → ブラウザが開いたまま停止</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step step-test">タイトル・タグを手動で確認・修正</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-step step-submit">ブラウザを閉じる → 自動的に次のサイトへ</div>
+    </div>
+
+    <ul style="margin-top: 12px">
+      <li>テストモード時はファイル移動もスキップ → 同じ素材で繰り返しテスト可能</li>
+      <li>工程0（一気通貫）ではブラウザを閉じると次のサイトの処理に自動的に進みます</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10. Customize -->
+<section id="customize">
+  <h2>10. カスタマイズ</h2>
+
+  <h3>プロンプトの編集</h3>
+  <div class="card-sm">
+    <p><code>prompts/</code> フォルダ内のテキストファイルを編集するだけで、AI のタグ生成ルールを変更できます。Python コードを触る必要はありません。</p>
+    <table>
+      <tr><th>ファイル</th><th>用途</th></tr>
+      <tr><td><code>prompts/image_prompt.txt</code></td><td>画像用プロンプト</td></tr>
+      <tr><td><code>prompts/video_prompt.txt</code></td><td>動画用プロンプト</td></tr>
+    </table>
+  </div>
+
+  <h3>Claude でカスタマイズ</h3>
+  <div class="card-sm">
+    <p>Claude（AI アシスタント）にコードを見せて、やりたいことを伝えるだけでカスタマイズできます。</p>
+    <ul>
+      <li>「Adobe Stock だけ使いたいので、他のサイトの処理を削除して」</li>
+      <li>「動画は扱わないので、画像だけのシンプル版にして」</li>
+      <li>「タグの生成ルールを変えたい」</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 11. Troubleshooting -->
+<section id="trouble">
+  <h2>11. トラブルシューティング</h2>
+  <table>
+    <tr><th>症状</th><th>原因</th><th>対処</th></tr>
+    <tr>
+      <td><code>Session expired</code></td>
+      <td>サイトのセッション切れ</td>
+      <td>該当の <code>*_login.py</code> を再実行</td>
+    </tr>
+    <tr>
+      <td>Gemini 429 エラー</td>
+      <td>API レート制限</td>
+      <td>自動リトライで回復待ち（無料枠: 1分5リクエスト）</td>
+    </tr>
+    <tr>
+      <td>Pixta タグ 0 個</td>
+      <td>Gemini レスポンス異常</td>
+      <td>ログを確認し、プロンプトを調整</td>
+    </tr>
+    <tr>
+      <td>アップロードが途中で停止</td>
+      <td>セッション期限切れ</td>
+      <td>該当サイトに再ログイン</td>
+    </tr>
+    <tr>
+      <td>API キーが見つからない</td>
+      <td><code>.env</code> ファイルが未作成</td>
+      <td><a href="#apikey">API キーの設定</a> を参照</td>
+    </tr>
+    <tr>
+      <td>ブラウザが自動で閉じない<br>（テストモード）</td>
+      <td>正常動作</td>
+      <td>確認後、手動でブラウザを閉じてください</td>
+    </tr>
+    <tr>
+      <td>CSV 適用後にタグが空</td>
+      <td>ポータル反映遅延</td>
+      <td>自動リトライで待機。解消しない場合は手動でリロード</td>
+    </tr>
+  </table>
+</section>
+
+<!-- 12. Tech -->
+<section id="tech">
+  <h2>12. 技術スタック・料金</h2>
+
+  <h3>使用技術</h3>
+  <table>
+    <tr><th>技術</th><th>用途</th></tr>
+    <tr><td>Python 3.10+</td><td>メイン言語</td></tr>
+    <tr><td>Tkinter</td><td>GUI</td></tr>
+    <tr><td>Google Gemini 2.5 Flash</td><td>画像・動画解析、タグ生成</td></tr>
+    <tr><td>Gemini Flash-Lite</td><td>バリエーションリネーム（コスト削減）</td></tr>
+    <tr><td>Playwright (Chromium)</td><td>ブラウザ自動化（3サイト）</td></tr>
+    <tr><td>Pillow / NumPy</td><td>画像処理・背景検出（PNG透過/黒背景判定）</td></tr>
+    <tr><td>python-dotenv</td><td>API キー管理</td></tr>
+  </table>
+
+  <h3>料金</h3>
+  <div class="card-sm">
+    <table>
+      <tr><th>サービス</th><th>料金</th></tr>
+      <tr><td>Gemini API（無料枠）</td><td>無料（1日25リクエスト）</td></tr>
+      <tr><td>Gemini API（有料）</td><td><a href="https://ai.google.dev/pricing">Google AI 料金ページ</a> 参照</td></tr>
+      <tr><td>Adobe Stock / Shutterstock / Pixta</td><td>コントリビューター登録は無料</td></tr>
+    </table>
+    <p class="sub">※ API の仕様・料金は変更される場合があります。最新情報は各公式サイトを参照してください。</p>
+  </div>
+</section>
+
+<div style="margin-top:60px; text-align:center; color:#8892b0; font-size:.85rem;">
+  <p>Stock Auto Tagger &mdash; MIT License</p>
+</div>
+
+</div>
+</body>
+</html>
