@@ -76,6 +76,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
         page = context.new_page()
+        _keep_open = skip_submit
 
         try:
             # ============================================================
@@ -293,8 +294,19 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             errors.append(str(e))
             raise
         finally:
-            context.close()
-            browser.close()
+            if not _keep_open:
+                context.close()
+                browser.close()
+            else:
+                log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
+                # ブラウザに定期的に通信し、閉じられたら例外で抜ける
+                try:
+                    while True:
+                        time.sleep(3)
+                        page.evaluate("1")
+                except Exception:
+                    pass
+                log("ブラウザが閉じられました。")
 
     return {"submitted": submitted, "errors": errors}
 

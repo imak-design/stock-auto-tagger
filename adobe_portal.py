@@ -77,6 +77,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
         page = context.new_page()
+        _keep_open = False
 
         try:
             # --- ポータルを開く ------------------------------------
@@ -225,6 +226,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                     _submit_for_review(page, log)
                 else:
                     # テストモード: 全選択だけして審査登録ボタン手前で停止
+                    _keep_open = True
                     log("\n>> [テストモード] 全ファイルを選択して停止します...")
                     select_all = page.locator('input[type=checkbox]').first
                     try:
@@ -243,8 +245,19 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # 一時ファイルを削除
             if upload_csv != csv_path and upload_csv.exists():
                 upload_csv.unlink()
-            context.close()
-            browser.close()
+            if not _keep_open:
+                context.close()
+                browser.close()
+            else:
+                log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
+                # ブラウザに定期的に通信し、閉じられたら例外で抜ける
+                try:
+                    while True:
+                        time.sleep(3)
+                        page.evaluate("1")
+                except Exception:
+                    pass
+                log("ブラウザが閉じられました。")
 
     return {"submitted": submitted, "errors": errors}
 

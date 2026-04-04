@@ -106,6 +106,7 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
     with sync_playwright() as p:
         browser, context = _launch(p)
         page = context.new_page()
+        _keep_open = skip_submit
 
         url = UPLOAD_URL_PHOTO if is_photo else UPLOAD_URL
 
@@ -274,6 +275,10 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
 
                 total_submitted_pages += checked_count
 
+                if skip_submit:
+                    log("[テストモード] 全選択完了。登録ボタンの手前で停止します。ブラウザで手動操作してください。")
+                    break
+
                 log("Clicking register button...")
                 reg_btn = page.locator("input[value='選択した作品を登録']")
                 reg_btn.wait_for(state="visible", timeout=5000)
@@ -296,66 +301,76 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
             checked_count = total_submitted_pages
             log(f"Total items selected across all pages: {checked_count}")
 
-            if "confirm" not in page.url:
-                raise RuntimeError(f"Expected confirm page but got: {page.url}")
-
             if skip_submit:
-                log("[テストモード] confirmページまで到達。審査申請ボタンを手動で押してください。")
-                return {"uploaded": uploaded, "submitted": 0, "errors": errors}
-
-            log("Waiting for confirm page to fully load...")
-            page.wait_for_load_state("networkidle", timeout=30000)
-            time.sleep(2)
-
-            log("Clicking submit-for-review button...")
-            confirm_btn = page.locator("#confirm_upload_btn")
-            try:
-                confirm_btn.scroll_into_view_if_needed(timeout=5000)
-                confirm_btn.wait_for(state="visible", timeout=30000)
-            except PWTimeout:
-                log(f"[DEBUG] confirm page URL: {page.url}")
-                log(f"[DEBUG] page title: {page.title()}")
-                exists = confirm_btn.count()
-                log(f"[DEBUG] #confirm_upload_btn count in DOM: {exists}")
-                if exists > 0:
-                    log("[DEBUG] Element exists but not visible, trying force click...")
-                    confirm_btn.click(force=True)
-                    log("Force-clicked 審査申請 button")
-                else:
-                    raise RuntimeError("#confirm_upload_btn not found on confirm page")
+                pass  # 登録ページで停止済み — confirmページには遷移しない
+            elif "confirm" not in page.url:
+                raise RuntimeError(f"Expected confirm page but got: {page.url}")
             else:
-                confirm_btn.click()
-                log("Clicked 審査申請 button")
-            time.sleep(5)
-            log(f"Final URL: {page.url}")
+                log("Waiting for confirm page to fully load...")
+                page.wait_for_load_state("networkidle", timeout=30000)
+                time.sleep(2)
 
-            # AI生成モーダルが表示された場合の処理
-            if is_ai:
+                log("Clicking submit-for-review button...")
+                confirm_btn = page.locator("#confirm_upload_btn")
                 try:
-                    modal = page.locator("div.modal-ai-generated-submit")
-                    modal.wait_for(state="visible", timeout=5000)
-                    log("AI生成確認モーダルが表示されました")
-                    submit_continue = page.locator("#submit-continue")
-                    submit_continue.click()
-                    log("[OK] モーダルの続行ボタンをクリック")
-                    time.sleep(3)
+                    confirm_btn.scroll_into_view_if_needed(timeout=5000)
+                    confirm_btn.wait_for(state="visible", timeout=30000)
                 except PWTimeout:
-                    log("(AI生成モーダルは表示されませんでした)")
+                    log(f"[DEBUG] confirm page URL: {page.url}")
+                    log(f"[DEBUG] page title: {page.title()}")
+                    exists = confirm_btn.count()
+                    log(f"[DEBUG] #confirm_upload_btn count in DOM: {exists}")
+                    if exists > 0:
+                        log("[DEBUG] Element exists but not visible, trying force click...")
+                        confirm_btn.click(force=True)
+                        log("Force-clicked 審査申請 button")
+                    else:
+                        raise RuntimeError("#confirm_upload_btn not found on confirm page")
+                else:
+                    confirm_btn.click()
+                    log("Clicked 審査申請 button")
 
-            if "confirm_complete" in page.url or "complete" in page.url or "manager" in page.url:
-                submitted = checked_count
-                log(f"[OK] Upload & submission complete! {uploaded} uploaded, {submitted} submitted.")
-            else:
-                log(f"[?] Unexpected URL: {page.url}")
-                submitted = checked_count
+                # AI生成モーダルが表示された場合の処理
+                if is_ai:
+                    try:
+                        modal = page.locator("div.modal-ai-generated-submit")
+                        modal.wait_for(state="visible", timeout=5000)
+                        log("AI生成確認モーダルが表示されました")
+                        submit_continue = page.locator("#submit-continue")
+                        submit_continue.click()
+                        log("[OK] モーダルの続行ボタンをクリック")
+                        time.sleep(3)
+                    except PWTimeout:
+                        log("(AI生成モーダルは表示されませんでした)")
+
+                time.sleep(5)
+                log(f"Final URL: {page.url}")
+
+                if "confirm_complete" in page.url or "complete" in page.url or "manager" in page.url:
+                    submitted = checked_count
+                    log(f"[OK] Upload & submission complete! {uploaded} uploaded, {submitted} submitted.")
+                else:
+                    log(f"[?] Unexpected URL: {page.url}")
+                    submitted = checked_count
 
         except Exception as e:
             log(f"[NG] Error: {e}")
             errors.append(str(e))
             raise
         finally:
-            context.close()
-            browser.close()
+            if not _keep_open:
+                context.close()
+                browser.close()
+            else:
+                log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
+                # ブラウザに定期的に通信し、閉じられたら例外で抜ける
+                try:
+                    while True:
+                        time.sleep(3)
+                        page.evaluate("1")
+                except Exception:
+                    pass
+                log("ブラウザが閉じられました。")
 
     return {"uploaded": uploaded, "submitted": submitted, "errors": errors}
 

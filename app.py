@@ -943,6 +943,49 @@ class StockTaggerApp:
                 log(f"[NG] Pixta Vector エラー: {e}")
                 failed_services.append("Pixta Vector")
 
+        # ---- AI素材の2パス処理（Adobe + Pixta のみ） ----
+        # ※ テストモード時にAdobe全選択でファイル形式変更が写真に影響しないよう、写真より先に処理
+        ai_adobe_csvs = sorted(csv_folder.glob("ai_adobe_stock_*.csv"),
+                               key=lambda f: f.stat().st_mtime, reverse=True)
+
+        if ai_files:
+            ai_targets_adobe = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+            ai_targets_pixta = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+
+            # AI → Adobe
+            if "adobe" in enabled_sites and ai_targets_adobe and ai_adobe_csvs and ADOBE_SESSION.exists():
+                try:
+                    log("\n" + "─" * 40)
+                    log(f"🤖 Adobe Stock AI素材アップロード開始... ({len(ai_targets_adobe)}件)")
+                    ai_adobe_result = run_portal_automation(
+                        csv_path=ai_adobe_csvs[0],
+                        progress_callback=log,
+                        headless=False,
+                        files=ai_targets_adobe,
+                        confirm_submit_callback=lambda: not self.test_mode,
+                        is_ai=True,
+                    )
+                    log(f"[OK] Adobe AI素材 提出完了: {ai_adobe_result['submitted']}件")
+                except Exception as e:
+                    log(f"[NG] Adobe AI素材 エラー: {e}")
+                    failed_services.append("Adobe AI素材")
+
+            # AI → Pixta
+            if "pixta" in enabled_sites and ai_targets_pixta and PIXTA_SESSION.exists():
+                try:
+                    log("\n" + "─" * 40)
+                    log(f"🤖 Pixta AI素材アップロード開始... ({len(ai_targets_pixta)}件)")
+                    ai_pixta_result = pixta_upload(
+                        files=ai_targets_pixta,
+                        progress_callback=log,
+                        skip_submit=self.test_mode,
+                        is_ai=True,
+                    )
+                    log(f"[OK] Pixta AI素材 完了: アップロード{ai_pixta_result['uploaded']}件 / 審査申請{ai_pixta_result['submitted']}件")
+                except Exception as e:
+                    log(f"[NG] Pixta AI素材 エラー: {e}")
+                    failed_services.append("Pixta AI素材")
+
         # ---- 写真素材の2パス処理（Adobe=写真カテゴリ + SS + Pixta=写真ページ） ----
         photo_files = get_photo_files(folder_path)
         photo_adobe_csvs = sorted(csv_folder.glob("photo_adobe_stock_*.csv"),
@@ -1003,48 +1046,6 @@ class StockTaggerApp:
                 except Exception as e:
                     log(f"[NG] Pixta 写真 エラー: {e}")
                     failed_services.append("Pixta 写真")
-
-        # ---- AI素材の2パス処理（Adobe + Pixta のみ） ----
-        ai_adobe_csvs = sorted(csv_folder.glob("ai_adobe_stock_*.csv"),
-                               key=lambda f: f.stat().st_mtime, reverse=True)
-
-        if ai_files:
-            ai_targets_adobe = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-            ai_targets_pixta = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-
-            # AI → Adobe
-            if "adobe" in enabled_sites and ai_targets_adobe and ai_adobe_csvs and ADOBE_SESSION.exists():
-                try:
-                    log("\n" + "─" * 40)
-                    log(f"🤖 Adobe Stock AI素材アップロード開始... ({len(ai_targets_adobe)}件)")
-                    ai_adobe_result = run_portal_automation(
-                        csv_path=ai_adobe_csvs[0],
-                        progress_callback=log,
-                        headless=False,
-                        files=ai_targets_adobe,
-                        confirm_submit_callback=lambda: not self.test_mode,
-                        is_ai=True,
-                    )
-                    log(f"[OK] Adobe AI素材 提出完了: {ai_adobe_result['submitted']}件")
-                except Exception as e:
-                    log(f"[NG] Adobe AI素材 エラー: {e}")
-                    failed_services.append("Adobe AI素材")
-
-            # AI → Pixta
-            if "pixta" in enabled_sites and ai_targets_pixta and PIXTA_SESSION.exists():
-                try:
-                    log("\n" + "─" * 40)
-                    log(f"🤖 Pixta AI素材アップロード開始... ({len(ai_targets_pixta)}件)")
-                    ai_pixta_result = pixta_upload(
-                        files=ai_targets_pixta,
-                        progress_callback=log,
-                        skip_submit=self.test_mode,
-                        is_ai=True,
-                    )
-                    log(f"[OK] Pixta AI素材 完了: アップロード{ai_pixta_result['uploaded']}件 / 審査申請{ai_pixta_result['submitted']}件")
-                except Exception as e:
-                    log(f"[NG] Pixta AI素材 エラー: {e}")
-                    failed_services.append("Pixta AI素材")
 
         # ---- ファイル移動（自動） ----
         log("\n" + "─" * 40)
@@ -1204,6 +1205,21 @@ class StockTaggerApp:
                 elif vector_eps:
                     log("[!] Adobe Vector用CSVが見つかりません。工程1を先に実行してください。")
 
+                # AI素材（写真より先に処理：テストモード時の全選択影響を回避）
+                if ai_files and ai_csvs:
+                    ai_targets = [f for f in ai_files if f.suffix.lower() in {".png", ".jpg", ".jpeg"}]
+                    if ai_targets:
+                        log(f"\n🤖 Adobe AI素材アップロード開始... ({len(ai_targets)}件)")
+                        ai_result = run_portal_automation(
+                            csv_path=ai_csvs[0],
+                            progress_callback=log,
+                            headless=False,
+                            files=ai_targets,
+                            confirm_submit_callback=lambda: not self.test_mode,
+                            is_ai=True,
+                        )
+                        log(f"[OK] Adobe AI素材 提出完了: {ai_result['submitted']}件")
+
                 # 写真素材（カテゴリ=写真）
                 if photo_files and photo_csvs:
                     photo_targets = [f for f in photo_files if f.suffix.lower() in {".png", ".jpg", ".jpeg"}]
@@ -1218,21 +1234,6 @@ class StockTaggerApp:
                             content_type="photo",
                         )
                         log(f"[OK] Adobe 写真 提出完了: {photo_result['submitted']}件")
-
-                # AI素材
-                if ai_files and ai_csvs:
-                    ai_targets = [f for f in ai_files if f.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-                    if ai_targets:
-                        log(f"\n🤖 Adobe AI素材アップロード開始... ({len(ai_targets)}件)")
-                        ai_result = run_portal_automation(
-                            csv_path=ai_csvs[0],
-                            progress_callback=log,
-                            headless=False,
-                            files=ai_targets,
-                            confirm_submit_callback=lambda: not self.test_mode,
-                            is_ai=True,
-                        )
-                        log(f"[OK] Adobe AI素材 提出完了: {ai_result['submitted']}件")
 
                 def on_adobe_done():
                     self._log("\n✓ 工程2 Adobe 完了！", "success")
