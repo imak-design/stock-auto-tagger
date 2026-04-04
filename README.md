@@ -135,7 +135,11 @@ python pixta_login.py         # Pixta
 python app.py
 ```
 
-**Mac**: `起動.command` をダブルクリック、または：
+**Mac**: 初回のみ、ターミナルで実行権限を付与してください：
+```bash
+chmod +x ~/Desktop/stock-auto-tagger/起動.command
+```
+その後 `起動.command` をダブルクリック、または：
 ```bash
 source venv/bin/activate
 python app.py
