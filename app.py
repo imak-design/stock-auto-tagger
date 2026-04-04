@@ -38,7 +38,8 @@ def load_config() -> dict:
             config = json.load(f)
     else:
         config = {"api_key": "", "input_folder": "", "variation_folder": ""}
-    config["api_key"] = os.environ.get("GEMINI_API_KEY", config.get("api_key", ""))
+    # APIキーは.envからのみ読み込む（config.jsonには保存しない）
+    config["api_key"] = os.environ.get("GEMINI_API_KEY", "")
     return config
 
 def save_config(config: dict):
@@ -143,6 +144,67 @@ class StockTaggerApp:
             padding=(8, 4))
         style.map("Browse.TButton",
             background=[("active", "#1a4a80")])
+
+        # --- 工程ボタン用スタイル ---
+        style.configure("Step0.TButton",
+            background="#64ffda",
+            foreground="#0a0a1a",
+            font=("BIZ UDゴシック", 10, "bold"),
+            relief="flat",
+            padding=(16, 8))
+        style.map("Step0.TButton",
+            background=[("active", "#4adbc0"), ("disabled", "#4a4a6a")],
+            foreground=[("disabled", "#888888")])
+
+        style.configure("Step1.TButton",
+            background="#e94560",
+            foreground="#ffffff",
+            font=("BIZ UDゴシック", 10, "bold"),
+            relief="flat",
+            padding=(16, 8))
+        style.map("Step1.TButton",
+            background=[("active", "#c73652"), ("disabled", "#4a4a6a")],
+            foreground=[("disabled", "#888888")])
+
+        style.configure("Adobe.TButton",
+            background="#1a6fa8",
+            foreground="#e0e0e0",
+            font=("BIZ UDゴシック", 10, "bold"),
+            relief="flat",
+            padding=(16, 8))
+        style.map("Adobe.TButton",
+            background=[("active", "#155a8a"), ("disabled", "#4a4a6a")],
+            foreground=[("disabled", "#888888")])
+
+        style.configure("SS.TButton",
+            background="#cc5500",
+            foreground="#e0e0e0",
+            font=("BIZ UDゴシック", 10, "bold"),
+            relief="flat",
+            padding=(16, 8))
+        style.map("SS.TButton",
+            background=[("active", "#aa4400"), ("disabled", "#4a4a6a")],
+            foreground=[("disabled", "#888888")])
+
+        style.configure("Pixta.TButton",
+            background="#b5338a",
+            foreground="#e0e0e0",
+            font=("BIZ UDゴシック", 10, "bold"),
+            relief="flat",
+            padding=(16, 8))
+        style.map("Pixta.TButton",
+            background=[("active", "#8f2870"), ("disabled", "#4a4a6a")],
+            foreground=[("disabled", "#888888")])
+
+        style.configure("Move.TButton",
+            background="#0f3460",
+            foreground="#e0e0e0",
+            font=("BIZ UDゴシック", 10, "bold"),
+            relief="flat",
+            padding=(16, 8))
+        style.map("Move.TButton",
+            background=[("active", "#1a4a80"), ("disabled", "#4a4a6a")],
+            foreground=[("disabled", "#888888")])
 
         style.configure("TProgressbar",
             background="#e94560",
@@ -256,23 +318,15 @@ class StockTaggerApp:
         btn_frame1 = ttk.Frame(main, style="TFrame")
         btn_frame1.pack(fill=tk.X, pady=(4, 4))
 
-        self.step0_btn = tk.Button(btn_frame1,
+        self.step0_btn = ttk.Button(btn_frame1,
             text="⚡  【工程0】リネーム → タグ生成",
-            bg="#64ffda", fg="#0a0a1a",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat", cursor="hand2",
-            padx=16, pady=8,
+            style="Step0.TButton",
             command=self._start_step0)
         self.step0_btn.pack(side=tk.LEFT)
 
-        self.run_btn = tk.Button(btn_frame1,
+        self.run_btn = ttk.Button(btn_frame1,
             text="▶  【工程1】タグ生成 & CSV出力",
-            bg="#e94560", fg="#ffffff",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat", cursor="hand2",
-            activebackground="#c73652", activeforeground="#ffffff",
-            disabledforeground="#888888",
-            padx=16, pady=8,
+            style="Step1.TButton",
             command=self._start_processing)
         self.run_btn.pack(side=tk.LEFT, padx=(12, 0))
 
@@ -286,39 +340,27 @@ class StockTaggerApp:
         btn_frame2 = ttk.Frame(main, style="TFrame")
         btn_frame2.pack(fill=tk.X, pady=(0, 12))
 
-        self.adobe_btn = tk.Button(btn_frame2,
+        self.adobe_btn = ttk.Button(btn_frame2,
             text="☁  【工程2】Adobe",
-            bg="#1a6fa8", fg="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat", cursor="hand2",
-            padx=16, pady=8,
+            style="Adobe.TButton",
             command=self._upload_adobe)
         self.adobe_btn.pack(side=tk.LEFT)
 
-        self.ss_btn = tk.Button(btn_frame2,
+        self.ss_btn = ttk.Button(btn_frame2,
             text="☁  【工程3】Shutterstock",
-            bg="#cc5500", fg="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief=tk.FLAT, activebackground="#aa4400",
-            padx=16, pady=8,
+            style="SS.TButton",
             command=self._upload_shutterstock)
         self.ss_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        self.pixta_btn = tk.Button(btn_frame2,
+        self.pixta_btn = ttk.Button(btn_frame2,
             text="🌸  【工程4】Pixta",
-            bg="#b5338a", fg="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief=tk.FLAT, activebackground="#8f2870",
-            padx=16, pady=8,
+            style="Pixta.TButton",
             command=self._upload_pixta)
         self.pixta_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        self.move_btn = tk.Button(btn_frame2,
+        self.move_btn = ttk.Button(btn_frame2,
             text="📦  【工程5】ファイル移動",
-            bg="#0f3460", fg="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat", cursor="hand2",
-            padx=16, pady=8,
+            style="Move.TButton",
             command=self._move_files)
         self.move_btn.pack(side=tk.LEFT, padx=(8, 0))
 
@@ -389,7 +431,14 @@ class StockTaggerApp:
             self._video_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         self._video_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        self._log("準備完了。APIキーとフォルダを確認して「タグ生成 & CSV出力」を押してください。", "info")
+        # APIキー読み込み状況をログに表示
+        api_key = self.config.get("api_key", "")
+        if api_key:
+            masked = api_key[:8] + "..." + api_key[-4:]
+            self._log(f"✓ APIキー読み込み済み（.env）: {masked}", "success")
+        else:
+            self._log("✗ APIキーが見つかりません。.envファイルにGEMINI_API_KEYを設定してください。", "error")
+        self._log("準備完了。フォルダを確認して実行ボタンを押してください。", "info")
 
     def _browse_folder(self):
         folder = filedialog.askdirectory(title="素材フォルダを選択")
@@ -435,16 +484,11 @@ class StockTaggerApp:
             self._timer_id = None
         self._timer_start = None
 
-    def _disable_btn(self, btn, bg="#4a4a6a", fg="#888888"):
-        btn.config(bg=bg, fg=fg, state="normal")
-        btn._cmd_backup = btn.cget("command")
-        btn.config(command="")
+    def _disable_btn(self, btn, **_kwargs):
+        btn.state(["disabled"])
 
-    def _enable_btn(self, btn, bg, fg="#e0e0e0"):
-        btn.config(bg=bg, fg=fg)
-        cmd = getattr(btn, "_cmd_backup", "")
-        if cmd:
-            btn.config(command=cmd)
+    def _enable_btn(self, btn, **_kwargs):
+        btn.state(["!disabled"])
 
     def _save_settings(self):
         config = {
