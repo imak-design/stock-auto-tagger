@@ -517,6 +517,8 @@ def embed_jpg_iptc(file_path: Path, title: str, keywords: list):
         return b"\x1c" + bytes([record, dataset]) + struct.pack(">H", len(value)) + value
 
     iptc_data = bytearray()
+    # UTF-8文字コード宣言（IPTC 1:90 Coded Character Set = ESC %G）
+    iptc_data += make_iptc_dataset(1, 90, b"\x1b\x25\x47")
     iptc_data += make_iptc_dataset(2, 5, title.encode("utf-8"))
     for kw in keywords:
         iptc_data += make_iptc_dataset(2, 25, kw.encode("utf-8"))

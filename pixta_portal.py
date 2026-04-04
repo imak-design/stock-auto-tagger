@@ -11,7 +11,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 SESSION_FILE = Path(__file__).parent / "pixta_session.json"
-UPLOAD_URL = "https://pixta.jp/mypage/upload/illustration"
+UPLOAD_URL = "https://pixta.jp/mypage/upload/illustration#per_page=100&sort=4"
 
 
 def _launch(p):
@@ -158,39 +158,48 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
             except PWTimeout:
                 log("[!] IPTC checkbox not found - continuing")
 
-            # アップロードボタンをクリック（ペンディングリストへ確定）
+            # サーバー側の処理完了を待機（ファイル数に応じて調整）
+            wait_sec = max(10, len(files) * 2)
+            log(f"Waiting {wait_sec}s for server to process {len(files)} file(s)...")
+            time.sleep(wait_sec)
+
+            # アップロ���ドボタンをクリック（ペンディングリストへ確定）
             log("Clicking upload confirm button...")
             submit_btn.wait_for(state="visible", timeout=5000)
             submit_btn.click()
             time.sleep(5)
             log(f"After upload-confirm URL: {page.url}")
 
-            # ペンディングリストに件数が増えるまで待機（最大30秒）
+            # per_page=100で再読み込みして全件表示
+            log("Reloading with per_page=100 to show all items...")
+            page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(5)
+
+            # ペンディングリストに件数が増えるまで待機
             log("Waiting for files to appear in pending list...")
-            for i in range(30):
-                time.sleep(1)
+            expected_total = items_before + len(files)
+            for i in range(60):
                 items_now = page.locator("input.submit_items").count()
-                if items_now >= items_before + len(files):
+                if items_now >= expected_total:
                     log(f"Files confirmed in pending list ({items_now} total)")
                     uploaded = len(files)
                     break
-                if i % 5 == 0 and i > 0:
-                    log(f"  ...waiting for list update ({i}s, current: {items_now})")
+                if i % 10 == 0:
+                    log(f"  ...waiting for list update ({i}s, current: {items_now}/{expected_total})")
+                time.sleep(2)
             else:
                 items_now = page.locator("input.submit_items").count()
-                expected_total = items_before + len(files)
-                log(f"[!] Expected {expected_total} items, got {items_now}. 再待機します...")
-                for retry in range(12):
-                    time.sleep(10)
-                    page.reload(wait_until="domcontentloaded", timeout=30000)
-                    time.sleep(3)
+                log(f"[!] Expected {expected_total} items, got {items_now}. 再読み込みで再試行...")
+                for retry in range(6):
+                    page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=30000)
+                    time.sleep(5)
                     items_now = page.locator("input.submit_items").count()
                     if items_now >= expected_total:
-                        log(f"再待機で反映確認: {items_now}件")
+                        log(f"再試行で反映確認: {items_now}件")
                         break
-                    log(f"  ...再待機 {(retry+1)*10}秒, 現在{items_now}/{expected_total}件")
+                    log(f"  ...再試行 {retry+1}/6, 現在{items_now}/{expected_total}件")
                 else:
-                    log(f"[!] 再待機タイムアウト: {items_now}/{expected_total}件で続行します")
+                    log(f"[!] タイムアウト: {items_now}/{expected_total}件で続行します")
                 uploaded = len(files)
 
             # -------------------------------------------------------
@@ -202,39 +211,69 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                 browser.close()
                 return {"uploaded": uploaded, "submitted": 0, "errors": errors}
 
-            log("Selecting all items for submission...")
-            all_cb = page.locator("#all-1")
-            all_cb.wait_for(state="visible", timeout=10000)
-            all_cb.click()
-            time.sleep(1)
+            # ページネーション対応: 全ページの作品を選択→登録を繰り返す
+            total_submitted_pages = 0
+            page_num = 0
+            while True:
+                page_num += 1
+                log(f"--- ページ {page_num} の処理 ---")
 
-            total_items = page.locator("input.submit_items").count()
-            checked_count = page.locator("input.submit_items:checked").count()
-            log(f"Checked items: {checked_count}/{total_items}")
+                all_cb = page.locator("#all-1")
+                try:
+                    all_cb.wait_for(state="visible", timeout=10000)
+                except PWTimeout:
+                    log("選択チェックボックスが見つかりません（全ページ処理済み）")
+                    break
 
-            if checked_count < total_items and total_items > 0:
-                log("[!] Select-all missed some items. Clicking individually...")
-                for item in page.locator("input.submit_items").all():
-                    try:
-                        if not item.is_checked():
-                            item.click(force=True)
-                            time.sleep(0.1)
-                    except Exception:
-                        pass
-                time.sleep(0.5)
+                all_cb.click()
+                time.sleep(1)
+
+                total_items = page.locator("input.submit_items").count()
                 checked_count = page.locator("input.submit_items:checked").count()
-                log(f"Checked after individual click: {checked_count}/{total_items}")
+                log(f"Checked items: {checked_count}/{total_items}")
 
-            if checked_count == 0:
-                log("[!] No items checked after select-all click.")
-                return {"uploaded": uploaded, "submitted": 0, "errors": ["No items checked"]}
+                if checked_count < total_items and total_items > 0:
+                    log("[!] Select-all missed some items. Clicking individually...")
+                    for item in page.locator("input.submit_items").all():
+                        try:
+                            if not item.is_checked():
+                                item.click(force=True)
+                                time.sleep(0.1)
+                        except Exception:
+                            pass
+                    time.sleep(0.5)
+                    checked_count = page.locator("input.submit_items:checked").count()
+                    log(f"Checked after individual click: {checked_count}/{total_items}")
 
-            log("Clicking register button...")
-            reg_btn = page.locator("input[value='選択した作品を登録']")
-            reg_btn.wait_for(state="visible", timeout=5000)
-            reg_btn.click()
-            time.sleep(4)
-            log(f"After register URL: {page.url}")
+                if checked_count == 0:
+                    if total_submitted_pages == 0:
+                        log("[!] No items checked after select-all click.")
+                        return {"uploaded": uploaded, "submitted": 0, "errors": ["No items checked"]}
+                    break
+
+                total_submitted_pages += checked_count
+
+                log("Clicking register button...")
+                reg_btn = page.locator("input[value='選択した作品を登録']")
+                reg_btn.wait_for(state="visible", timeout=5000)
+                reg_btn.click()
+                time.sleep(4)
+                log(f"After register URL: {page.url}")
+
+                # 登録後にまだアップロードページにいる場合 → 次ページの作品がある
+                if "confirm" not in page.url:
+                    # まだ残りがある可能性: ページをリロードして次の作品を処理
+                    remaining = page.locator("input.submit_items").count()
+                    if remaining > 0:
+                        log(f"残り {remaining} 件の作品があります。次のページを処理します...")
+                        time.sleep(2)
+                        continue
+                    else:
+                        raise RuntimeError(f"Expected confirm page but got: {page.url}")
+                break
+
+            checked_count = total_submitted_pages
+            log(f"Total items selected across all pages: {checked_count}")
 
             if "confirm" not in page.url:
                 raise RuntimeError(f"Expected confirm page but got: {page.url}")
@@ -326,42 +365,67 @@ def run_submit(progress_callback=None) -> dict:
                 raise PermissionError("Session expired. Run pixta_login.py again.")
             log(f"Page loaded: {page.url}")
 
-            log("Selecting all items...")
-            all_cb = page.locator("#all-1")
-            all_cb.wait_for(state="visible", timeout=10000)
-            all_cb.click()
-            time.sleep(1)
+            # ページネーション対応: 全ページの作品を選択→登録を繰り返す
+            total_submitted_pages = 0
+            page_num = 0
+            while True:
+                page_num += 1
+                log(f"--- ページ {page_num} の処理 ---")
 
-            total_items = page.locator("input.submit_items").count()
-            checked_count = page.locator("input.submit_items:checked").count()
-            log(f"Checked items: {checked_count}/{total_items}")
+                all_cb = page.locator("#all-1")
+                try:
+                    all_cb.wait_for(state="visible", timeout=10000)
+                except PWTimeout:
+                    log("選択チェックボックスが見つかりません（全ページ処理済み）")
+                    break
 
-            if checked_count < total_items and total_items > 0:
-                log("[!] Select-all missed some items. Clicking individually...")
-                for item in page.locator("input.submit_items").all():
-                    try:
-                        if not item.is_checked():
-                            item.click(force=True)
-                            time.sleep(0.1)
-                    except Exception:
-                        pass
-                time.sleep(0.5)
+                all_cb.click()
+                time.sleep(1)
+
+                total_items = page.locator("input.submit_items").count()
                 checked_count = page.locator("input.submit_items:checked").count()
-                log(f"Checked after individual click: {checked_count}/{total_items}")
+                log(f"Checked items: {checked_count}/{total_items}")
 
-            if checked_count == 0:
-                log("[!] No items to submit.")
-                return {"submitted": 0, "errors": ["No items checked"]}
+                if checked_count < total_items and total_items > 0:
+                    log("[!] Select-all missed some items. Clicking individually...")
+                    for item in page.locator("input.submit_items").all():
+                        try:
+                            if not item.is_checked():
+                                item.click(force=True)
+                                time.sleep(0.1)
+                        except Exception:
+                            pass
+                    time.sleep(0.5)
+                    checked_count = page.locator("input.submit_items:checked").count()
+                    log(f"Checked after individual click: {checked_count}/{total_items}")
 
-            log("Clicking register button...")
-            reg_btn = page.locator("input[value='選択した作品を登録']")
-            reg_btn.wait_for(state="visible", timeout=5000)
-            reg_btn.click()
-            time.sleep(4)
-            log(f"After register URL: {page.url}")
+                if checked_count == 0:
+                    if total_submitted_pages == 0:
+                        log("[!] No items to submit.")
+                        return {"submitted": 0, "errors": ["No items checked"]}
+                    break
 
-            if "confirm" not in page.url:
-                raise RuntimeError(f"Expected confirm page but got: {page.url}")
+                total_submitted_pages += checked_count
+
+                log("Clicking register button...")
+                reg_btn = page.locator("input[value='選択した作品を登録']")
+                reg_btn.wait_for(state="visible", timeout=5000)
+                reg_btn.click()
+                time.sleep(4)
+                log(f"After register URL: {page.url}")
+
+                if "confirm" not in page.url:
+                    remaining = page.locator("input.submit_items").count()
+                    if remaining > 0:
+                        log(f"残り {remaining} 件の作品があります。次のページを処理します...")
+                        time.sleep(2)
+                        continue
+                    else:
+                        raise RuntimeError(f"Expected confirm page but got: {page.url}")
+                break
+
+            checked_count = total_submitted_pages
+            log(f"Total items selected across all pages: {checked_count}")
 
             log("Waiting for confirm page to fully load...")
             page.wait_for_load_state("networkidle", timeout=30000)
