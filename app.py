@@ -14,7 +14,9 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+ENV_DIR = Path.home() / ".stock-auto-tagger"
+ENV_FILE = ENV_DIR / ".env"
+load_dotenv(ENV_FILE)
 
 # メイン処理をインポート
 sys.path.insert(0, str(Path(__file__).parent))
@@ -435,9 +437,10 @@ class StockTaggerApp:
         api_key = self.config.get("api_key", "")
         if api_key:
             masked = api_key[:8] + "..." + api_key[-4:]
-            self._log(f"✓ APIキー読み込み済み（.env）: {masked}", "success")
+            self._log(f"✓ APIキー読み込み済み: {masked}", "success")
         else:
-            self._log("✗ APIキーが見つかりません。.envファイルにGEMINI_API_KEYを設定してください。", "error")
+            env_path = ENV_DIR / ".env"
+            self._log(f"✗ APIキーが見つかりません。{env_path} にGEMINI_API_KEYを設定してください。", "error")
         self._log("準備完了。フォルダを確認して実行ボタンを押してください。", "info")
 
     def _browse_folder(self):

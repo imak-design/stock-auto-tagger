@@ -6,8 +6,9 @@ Stock Media Auto Tagger - メイン処理モジュール
 
 import os
 import re
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(Path.home() / ".stock-auto-tagger" / ".env")
 import csv
 import json
 import time
@@ -16,7 +17,6 @@ import base64
 import struct
 import mimetypes
 import tempfile
-from pathlib import Path
 from datetime import datetime
 
 # ============================================================
