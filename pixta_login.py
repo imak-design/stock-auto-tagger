@@ -12,7 +12,7 @@ from pathlib import Path
 SESSION_FILE = Path(__file__).parent / "pixta_session.json"
 USER_DATA_DIR = Path(__file__).parent / "pixta_profile"
 
-LOGIN_URL = "https://pixta.jp/sign_in"
+LOGIN_URL = "https://pixta.jp/mypage"
 
 
 def save_session():
@@ -37,7 +37,7 @@ def save_session():
 
         for _ in range(360):
             url = page.url
-            if "pixta.jp" in url and "sign_in" not in url and "login" not in url:
+            if "pixta.jp/mypage" in url:
                 break
             time.sleep(0.5)
         else:
