@@ -980,6 +980,38 @@ def rename_variation_folders(api_key: str, output_folder: str, variation_base: s
 # メイン処理
 # ============================================================
 
+AI_FOLDER_NAME = "AI"
+PHOTO_FOLDER_NAME = "Photo"
+
+
+def get_ai_folder(input_folder: Path) -> Path:
+    """AIフォルダのパスを返す"""
+    return Path(input_folder) / AI_FOLDER_NAME
+
+
+def get_ai_files(input_folder: Path) -> list:
+    """AIフォルダ内の対象ファイルを返す（空ならリスト空）"""
+    ai_folder = get_ai_folder(input_folder)
+    if not ai_folder.exists():
+        return []
+    return [f for f in ai_folder.iterdir()
+            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
+
+
+def get_photo_folder(input_folder: Path) -> Path:
+    """写真フォルダのパスを返す"""
+    return Path(input_folder) / PHOTO_FOLDER_NAME
+
+
+def get_photo_files(input_folder: Path) -> list:
+    """写真フォルダ内の対象ファイルを返す（空ならリスト空）"""
+    photo_folder = get_photo_folder(input_folder)
+    if not photo_folder.exists():
+        return []
+    return [f for f in photo_folder.iterdir()
+            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
+
+
 def process_folder(input_folder: str, api_key: str, progress_callback=None, status_callback=None) -> dict:
     start_time = time.time()
 
@@ -987,14 +1019,22 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     if not input_path.exists():
         raise FileNotFoundError(f"フォルダが見つかりません: {input_folder}")
 
+    # 通常素材
     files = [f for f in input_path.iterdir()
              if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS]
+    # 写真素材
+    photo_files = get_photo_files(input_path)
+    # AI素材
+    ai_files = get_ai_files(input_path)
 
-    if not files:
+    all_files = files + photo_files + ai_files
+    if not all_files:
         raise ValueError("対応する素材ファイルが見つかりませんでした")
 
-    total = len(files)
+    total = len(all_files)
     results = []
+    photo_results = []
+    ai_results = []
     errors = []
 
     csv_folder = input_path / "csv_output"
@@ -1006,14 +1046,20 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     base_dir = input_path.parent
     dest_folder = get_destination_folder(base_dir)
 
-    for i, file_path in enumerate(files, 1):
+    ai_folder_path = get_ai_folder(input_path)
+    photo_folder_path = get_photo_folder(input_path)
+
+    for i, file_path in enumerate(all_files, 1):
         ext = file_path.suffix.lower()
         file_type = "video" if ext in VIDEO_EXTENSIONS else "image"
+        is_ai = file_path.parent == ai_folder_path
+        is_photo = file_path.parent == photo_folder_path
 
         if status_callback:
             status_callback(i, total, file_path.name)
         if progress_callback:
-            progress_callback(f"[{i}/{total}] 解析中: {file_path.name}")
+            prefix = "[AI] " if is_ai else "[写真] " if is_photo else ""
+            progress_callback(f"[{i}/{total}] {prefix}解析中: {file_path.name}")
 
         try:
             if file_type == "video":
@@ -1024,7 +1070,15 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
             metadata["filename"] = file_path.name
             metadata["file_type"] = file_type
             metadata["original_path"] = str(file_path)
-            results.append(metadata)
+            metadata["is_ai"] = is_ai
+            metadata["is_photo"] = is_photo
+
+            if is_ai:
+                ai_results.append(metadata)
+            elif is_photo:
+                photo_results.append(metadata)
+            else:
+                results.append(metadata)
 
             if progress_callback:
                 progress_callback(f"  完了: {metadata.get('adobe_title_en', '')[:50]}")
@@ -1034,20 +1088,44 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
             if progress_callback:
                 progress_callback(f"  エラー: {file_path.name} - {str(e)}")
 
-    if not results:
+    if not results and not photo_results and not ai_results:
         raise ValueError("処理できたファイルがありません")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    adobe_path = csv_folder / f"adobe_stock_{timestamp}.csv"
-    shutter_path = csv_folder / f"shutterstock_{timestamp}.csv"
 
-    write_adobe_stock_csv(results, adobe_path)
-    write_shutterstock_csv(results, shutter_path)
+    # 通常素材のCSV
+    if results:
+        adobe_path = csv_folder / f"adobe_stock_{timestamp}.csv"
+        shutter_path = csv_folder / f"shutterstock_{timestamp}.csv"
+        write_adobe_stock_csv(results, adobe_path)
+        write_shutterstock_csv(results, shutter_path)
+
+    # 写真素材のCSV（3サイト全部）
+    if photo_results:
+        photo_adobe_path = csv_folder / f"photo_adobe_stock_{timestamp}.csv"
+        photo_shutter_path = csv_folder / f"photo_shutterstock_{timestamp}.csv"
+        write_adobe_stock_csv(photo_results, photo_adobe_path)
+        write_shutterstock_csv(photo_results, photo_shutter_path)
+
+    # AI素材のCSV（Shutterstock不要）
+    if ai_results:
+        ai_adobe_path = csv_folder / f"ai_adobe_stock_{timestamp}.csv"
+        write_adobe_stock_csv(ai_results, ai_adobe_path)
 
     if progress_callback:
         progress_callback(f"\nCSV出力完了 → {csv_folder}")
+        if results:
+            progress_callback(f"  通常素材: {len(results)}件")
+        if photo_results:
+            progress_callback(f"  写真素材: {len(photo_results)}件")
+        if ai_results:
+            progress_callback(f"  AI素材: {len(ai_results)}件")
+
+    # Pixta用メタデータ埋め込み（通常 + 写真 + AI全部）
+    all_results = results + photo_results + ai_results
+    if progress_callback:
         progress_callback("Pixta用メタデータを画像に埋め込み中...")
-    embedded = embed_pixta_metadata(results, progress_callback)
+    embedded = embed_pixta_metadata(all_results, progress_callback)
     if progress_callback:
         progress_callback(f"  メタデータ埋め込み完了: {embedded}件")
 
@@ -1057,12 +1135,14 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     elapsed_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
 
     return {
-        "success": len(results),
+        "success": len(all_results),
         "error": len(errors),
         "errors": errors,
         "csv_folder": str(csv_folder),
         "results": results,
-        "video_results": [r for r in results if r.get("file_type") == "video"],
+        "photo_results": photo_results,
+        "ai_results": ai_results,
+        "video_results": [r for r in all_results if r.get("file_type") == "video"],
         "elapsed": elapsed_str
     }
 

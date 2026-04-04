@@ -221,7 +221,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # STEP 5: 画像を審査提出
             # ============================================================
             if skip_submit:
-                log("[テストモード] 審査提出をスキップしました。")
+                log("[テストモード] 審査提出ボタンの手前で停止します。手動で提出ボタンを押してください。")
                 context.close()
                 return {"submitted": 0, "errors": errors}
 

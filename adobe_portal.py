@@ -25,7 +25,8 @@ def _convert_csv_categories(src_path: Path) -> Path:
 
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
                           expected_count: int = 0, files: list = None,
-                          confirm_submit_callback=None):
+                          confirm_submit_callback=None, is_ai: bool = False,
+                          content_type: str = "illustration"):
     """
     ポータルにファイルをアップロードし、CSV でメタデータを一括適用して審査に登録する。
 
@@ -203,9 +204,17 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             log("\n>> CSV アップロード開始...")
             submitted = _upload_metadata_csv(page, upload_csv, log)
 
-            # --- Step2: 画像ファイルのみコンテンツタイプを「イラスト」に設定 ------
-            log("\n>> 画像ファイルのコンテンツタイプをイラストに設定...")
-            _set_content_type_illustration(page, log)
+            # --- Step2: コンテンツタイプ + AI設定 ------
+            if is_ai:
+                # AI: 全選択 → イラスト + AIチェック → 一括保存
+                log("\n>> 全選択してコンテンツタイプ(イラスト) + AI生成チェックを一括設定...")
+                _select_all_and_set(page, log, content_value="2", content_label="イラスト", set_ai=True)
+            elif content_type == "photo":
+                log("\n>> 画像ファイルのコンテンツタイプを写真に設定...")
+                _set_content_type(page, log, value="1", label="写真")
+            else:
+                log("\n>> 画像ファイルのコンテンツタイプをイラストに設定...")
+                _set_content_type(page, log, value="2", label="イラスト")
 
             # --- Step3: 審査に登録 ------------------------------------
             if submitted >= 0:
@@ -215,7 +224,16 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 if should_submit:
                     _submit_for_review(page, log)
                 else:
-                    log("審査提出をスキップしました（ユーザーがキャンセル）。")
+                    # テストモード: 全選択だけして審査登録ボタン手前で停止
+                    log("\n>> [テストモード] 全ファイルを選択して停止します...")
+                    select_all = page.locator('input[type=checkbox]').first
+                    try:
+                        if select_all.is_visible(timeout=3000) and not select_all.is_checked():
+                            select_all.click()
+                            time.sleep(1)
+                            log("全ファイルを選択しました。審査登録ボタンを手動で押してください。")
+                    except PWTimeout:
+                        log("[!] 全選択チェックボックスが見つかりません")
 
         except Exception as e:
             log(f"NG エラー: {e}")
@@ -294,9 +312,12 @@ def _upload_files(page, files: list, log) -> int:
             "ポータルのUIが変更されている可能性があります。"
         )
 
-    # アップロード完了までの最低待機時間をファイルサイズから推定（最低3分）
+    # アップロード完了までの最低待機時間をファイルサイズから推定
+    VIDEO_EXTS = {".mp4", ".mov", ".avi"}
+    has_video = any(f.suffix.lower() in VIDEO_EXTS for f in files)
     total_mb = sum(f.stat().st_size for f in files) / (1024 * 1024)
-    min_wait = max(180, int(total_mb * 0.3))  # 約3MB/s想定、最低3分
+    base_wait = 180 if has_video else 60  # 動画あり: 最低3分、画像のみ: 最低1分
+    min_wait = max(base_wait, int(total_mb * 0.3))  # 約3MB/s想定
     log(f"ファイルをセット完了。アップロード開始 (総{total_mb:.0f}MB、最低{min_wait}秒待機後にリロード)")
 
     # アップロード完了まで待機（リロード禁止）
@@ -323,12 +344,73 @@ def _upload_files(page, files: list, log) -> int:
     return expected
 
 
-def _set_content_type_illustration(page, log):
+def _select_all_and_set(page, log, content_value="2", content_label="イラスト", set_ai=False):
+    """
+    全ファイルを選択してコンテンツタイプとAI生成チェックを一括設定する。
+    AI素材用: 全選択 → イラスト設定 → AIチェック → 保存
+    """
+    # 全選択チェックボックスをクリック
+    try:
+        page.locator('input[type=checkbox]').first.wait_for(state="visible", timeout=10000)
+        checkboxes = page.locator('input[type=checkbox]').all()
+    except PWTimeout:
+        log("[!] チェックボックスが見つかりません。スキップします。")
+        return
+
+    select_all = checkboxes[0]
+    if not select_all.is_checked():
+        select_all.click()
+        time.sleep(1.5)
+    log("全ファイルを選択しました")
+
+    # コンテンツタイプ設定
+    ct_sel = page.locator('select[name="contentType"]').first
+    try:
+        current = ct_sel.input_value()
+        if current == content_value:
+            log(f"コンテンツタイプは既に{content_label}です")
+        else:
+            ct_sel.select_option(value=content_value)
+            time.sleep(1)
+            log(f"コンテンツタイプ → {content_label} に変更")
+    except PWTimeout:
+        log("[!] contentType セレクトが見つかりません")
+
+    # AI生成チェックボックス
+    if set_ai:
+        try:
+            ai_checkbox = page.locator('#content-tagger-generative-ai-checkbox')
+            ai_checkbox.wait_for(state="visible", timeout=10000)
+            if not ai_checkbox.is_checked():
+                ai_checkbox.click()
+                time.sleep(1)
+            log("[OK] AI生成チェックボックスをONにしました")
+        except Exception as e:
+            log(f"[!] AI生成チェックボックスの処理に失敗: {e}")
+
+    # 保存
+    save_btn = page.locator('[data-t="save-work"]').first
+    try:
+        if save_btn.is_visible(timeout=3000):
+            disabled = save_btn.get_attribute("disabled")
+            if disabled is None:
+                save_btn.click()
+                time.sleep(3)
+                log("[OK] 保存完了")
+            else:
+                log("保存ボタンは無効（変更なし）")
+        else:
+            log("[!] 保存ボタンが見つかりません")
+    except PWTimeout:
+        log("[!] 保存ボタンが見つかりません")
+
+
+def _set_content_type(page, log, value="2", label="イラスト"):
     """
     画像ファイルのコンテンツタイプを設定し保存する。
     - EPS（ベクター）: アップロード時に自動でベクターに設定されるためスキップ
     - 動画: スキップ
-    - それ以外の画像: 「イラスト」(value=2) に設定
+    - それ以外の画像: 指定されたvalue (1=写真, 2=イラスト) に設定
     """
     VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".webm"}
     VECTOR_EXTS = {".eps", ".ai"}
@@ -359,7 +441,7 @@ def _set_content_type_illustration(page, log):
         if vector_indices:
             log(f"ベクターファイルはコンテンツタイプ自動設定のためスキップします")
         if not image_indices:
-            log("[!] イラスト設定対象の画像ファイルがありません。スキップします。")
+            log(f"[!] {label}設定対象の画像ファイルがありません。スキップします。")
             # ベクターのアイコンチェックだけ実行
             if vector_indices:
                 _set_icon_checkbox(page, content, vector_indices, log)
@@ -395,16 +477,16 @@ def _set_content_type_illustration(page, log):
 
     time.sleep(1)
 
-    # contentType を「イラスト」(2) に変更
+    # contentType を設定
     ct_sel = page.locator('select[name="contentType"]').first
     try:
         current = ct_sel.input_value()
-        if current == "2":
-            log("コンテンツタイプは既にイラストです")
+        if current == value:
+            log(f"コンテンツタイプは既に{label}です")
         else:
-            ct_sel.select_option(value="2")
+            ct_sel.select_option(value=value)
             time.sleep(1)
-            log("コンテンツタイプ → イラスト に変更")
+            log(f"コンテンツタイプ → {label} に変更")
     except PWTimeout:
         log("[!] contentType セレクトが見つかりません")
         return
