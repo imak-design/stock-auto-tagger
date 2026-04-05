@@ -830,82 +830,101 @@ class StockTaggerApp:
         failed_services = []  # エラーが発生したサービス名を記録
         enabled_sites = self._get_enabled_sites()
 
-        # ---- Adobe Stock ----
+        # ---- Adobe Stock（全素材を1回でアップロード）----
         adobe_csvs = sorted(csv_folder.glob("adobe_stock_*.csv"),
                             key=lambda f: f.stat().st_mtime, reverse=True)
-        vector_adobe_csvs = sorted(csv_folder.glob("vector_adobe_*.csv"),
-                                   key=lambda f: f.stat().st_mtime, reverse=True)
         adobe_targets = get_upload_targets(folder_path, "adobe")
         vector_eps_files = get_vector_eps_files(folder_path)
-
         ai_files = get_ai_files(folder_path)
+        photo_files = get_photo_files(folder_path)
+
+        # 全Adobeファイルを統合（動画含む）
+        all_adobe_files = list(adobe_targets) + list(vector_eps_files) + list(ai_files) + list(photo_files)
+
+        # file_settings: ファイル名→{content_type, is_ai}（動画・ベクターは自動設定のためスキップされる）
+        adobe_file_settings = {}
+        for f in adobe_targets:
+            adobe_file_settings[f.name] = {"content_type": "illustration", "is_ai": False}
+        for f in vector_eps_files:
+            adobe_file_settings[f.name] = {"content_type": "illustration", "is_ai": False}
+        for f in ai_files:
+            adobe_file_settings[f.name] = {"content_type": "illustration", "is_ai": True}
+        for f in photo_files:
+            adobe_file_settings[f.name] = {"content_type": "photo", "is_ai": False}
 
         if "adobe" not in enabled_sites:
             log("[—] Adobe Stock は無効です。スキップします。")
         elif not ADOBE_SESSION.exists():
             log("[!] adobe_session.json が見つかりません。Adobeをスキップします。")
             failed_services.append("Adobe Stock")
-        elif not adobe_targets and not ai_files:
+        elif not all_adobe_files:
             log("[!] Adobeにアップロード対象のファイルがありません。Adobeをスキップします。")
-        elif not adobe_csvs and not ai_files:
+        elif not adobe_csvs:
             log("[!] Adobe用CSVが見つかりません。Adobeをスキップします。")
         else:
-            if adobe_targets and adobe_csvs:
-                try:
-                    log("\n" + "─" * 40)
-                    log(f"☁ Adobe Stock ブラウザアップロード開始... ({len(adobe_targets)}件)")
-
-                    portal_result = run_portal_automation(
-                        csv_path=adobe_csvs[0],
-                        progress_callback=log,
-                        headless=False,
-                        files=adobe_targets,
-                        confirm_submit_callback=lambda: not self.test_mode,
-                    )
-                    log(f"[OK] Adobe ポータル提出完了: {portal_result['submitted']}件")
-                except Exception as e:
-                    log(f"[NG] Adobe エラー: {e}")
-                    failed_services.append("Adobe Stock")
-
-        # Adobe ベクター EPS アップロード
-        if "adobe" in enabled_sites and vector_eps_files and vector_adobe_csvs and ADOBE_SESSION.exists():
             try:
-                log(f"\n☁ Adobe Vector EPS アップロード開始... ({len(vector_eps_files)}件)")
-                vec_adobe_result = run_portal_automation(
-                    csv_path=vector_adobe_csvs[0],
+                log("\n" + "─" * 40)
+                log(f"☁ Adobe Stock 一括アップロード開始... ({len(all_adobe_files)}件)")
+                details = []
+                if adobe_targets:
+                    details.append(f"通常{len(adobe_targets)}")
+                if vector_eps_files:
+                    details.append(f"ベクター{len(vector_eps_files)}")
+                if ai_files:
+                    details.append(f"AI{len(ai_files)}")
+                if photo_files:
+                    details.append(f"写真{len(photo_files)}")
+                log(f"  内訳: {' / '.join(details)}")
+
+                portal_result = run_portal_automation(
+                    csv_path=adobe_csvs[0],
                     progress_callback=log,
                     headless=False,
-                    files=vector_eps_files,
+                    files=all_adobe_files,
                     confirm_submit_callback=lambda: not self.test_mode,
+                    file_settings=adobe_file_settings,
                 )
-                log(f"[OK] Adobe Vector 提出完了: {vec_adobe_result['submitted']}件")
+                log(f"[OK] Adobe ポータル提出完了: {portal_result['submitted']}件")
             except Exception as e:
-                log(f"[NG] Adobe Vector エラー: {e}")
-                failed_services.append("Adobe Vector")
+                log(f"[NG] Adobe エラー: {e}")
+                failed_services.append("Adobe Stock")
 
-        # ---- Shutterstock ----
+        # ---- Shutterstock（全素材を1回でアップロード）----
         ss_csvs = sorted(csv_folder.glob("shutterstock_*.csv"),
                          key=lambda f: f.stat().st_mtime, reverse=True)
-        vector_ss_csvs = sorted(csv_folder.glob("vector_shutterstock_*.csv"),
-                                key=lambda f: f.stat().st_mtime, reverse=True)
         ss_targets = get_upload_targets(folder_path, "shutterstock")
+        # vector_eps_files は Adobe セクションで既に取得済み
+        # photo_files も Adobe セクションで既に取得済み
+
+        # 全SSファイルを統合（通常 + ベクター + 写真、AI除外）
+        photo_ss_files = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+        all_ss_files = list(ss_targets) + list(vector_eps_files) + photo_ss_files
 
         if "shutterstock" not in enabled_sites:
             log("[—] Shutterstock は無効です。スキップします。")
         elif not SS_SESSION.exists():
             log("[!] shutterstock_session.json が見つかりません。Shutterstockをスキップします。")
             failed_services.append("Shutterstock")
+        elif not all_ss_files:
+            log("[!] Shutterstockにアップロード対象のファイルがありません。Shutterstockをスキップします。")
         elif not ss_csvs:
             log("[!] Shutterstock用CSVが見つかりません。Shutterstockをスキップします。")
-        elif not ss_targets:
-            log("[!] Shutterstockにアップロード対象のファイルがありません。Shutterstockをスキップします。")
         else:
             try:
                 log("\n" + "─" * 40)
-                log(f"☁ Shutterstock ブラウザアップロード開始... ({len(ss_targets)}件)")
+                log(f"☁ Shutterstock 一括アップロード開始... ({len(all_ss_files)}件)")
+                details = []
+                if ss_targets:
+                    details.append(f"通常{len(ss_targets)}")
+                if vector_eps_files:
+                    details.append(f"ベクター{len(vector_eps_files)}")
+                if photo_ss_files:
+                    details.append(f"写真{len(photo_ss_files)}")
+                log(f"  内訳: {' / '.join(details)}")
+
                 ss_portal_result = ss_portal(
                     csv_path=ss_csvs[0],
-                    files=ss_targets,
+                    files=all_ss_files,
                     progress_callback=log,
                     headless=False,
                     skip_submit=self.test_mode,
@@ -915,195 +934,113 @@ class StockTaggerApp:
                 log(f"[NG] Shutterstock エラー: {e}")
                 failed_services.append("Shutterstock")
 
-        # Shutterstock ベクター EPS アップロード
-        if "shutterstock" in enabled_sites and vector_eps_files and vector_ss_csvs and SS_SESSION.exists():
-            try:
-                log(f"\n☁ Shutterstock Vector EPS アップロード開始... ({len(vector_eps_files)}件)")
-                vec_ss_result = ss_portal(
-                    csv_path=vector_ss_csvs[0],
-                    files=vector_eps_files,
-                    progress_callback=log,
-                    headless=False,
-                    skip_submit=self.test_mode,
-                )
-                log(f"[OK] Shutterstock Vector 提出完了: {vec_ss_result['submitted']}件")
-            except Exception as e:
-                log(f"[NG] Shutterstock Vector エラー: {e}")
-                failed_services.append("Shutterstock Vector")
-
-        # ---- Pixta 画像 ----
-        video_targets = []
+        # ---- Pixta（イラスト + 動画 + 写真の3工程）----
+        video_targets = []  # ファイル移動で参照するため初期化
         if "pixta" not in enabled_sites:
             log("[—] Pixta は無効です。スキップします。")
         elif not PIXTA_SESSION.exists():
             log("[!] pixta_session.json が見つかりません。Pixtaをスキップします。")
             failed_services.append("Pixta")
         else:
-            all_targets = get_upload_targets(folder_path, "pixta")
-            image_targets = [f for f in all_targets if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-            video_targets = [f for f in all_targets if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
+            # ファイル収集
+            all_pixta = get_upload_targets(folder_path, "pixta")
+            pixta_images = [f for f in all_pixta if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+            pixta_videos = [f for f in all_pixta if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
 
-            if image_targets:
+            ai_files_all = get_ai_files(folder_path)
+            ai_images = [f for f in ai_files_all if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+            ai_videos = [f for f in ai_files_all if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
+
+            photo_files_all = get_photo_files(folder_path)
+            photo_images = [f for f in photo_files_all if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+
+            # ベクターZIP
+            vector_results = getattr(self, 'last_vector_results', [])
+            vector_zips = []
+            if vector_results:
+                try:
+                    vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
+                except Exception as e:
+                    log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
+                    failed_services.append("Pixta Vector")
+
+            # ---- 工程A: イラストページ（通常画像 + ベクターZIP + AI画像）----
+            illust_files = pixta_images + vector_zips + ai_images
+            ai_image_names = {f.name for f in ai_images} if ai_images else None
+
+            if illust_files:
                 try:
                     log("\n" + "─" * 40)
-                    log(f"🌸 Pixta 画像アップロード開始: {len(image_targets)}件...")
-                    pixta_result = pixta_upload(files=image_targets, progress_callback=log, skip_submit=self.test_mode)
-                    log(f"[OK] Pixta画像完了: アップロード{pixta_result['uploaded']}件 / 審査申請{pixta_result['submitted']}件")
+                    log(f"🌸 Pixta イラスト一括アップロード開始: {len(illust_files)}件...")
+                    details = []
+                    if pixta_images:
+                        details.append(f"通常{len(pixta_images)}")
+                    if vector_zips:
+                        details.append(f"ベクター{len(vector_zips)}")
+                    if ai_images:
+                        details.append(f"AI{len(ai_images)}")
+                    log(f"  内訳: {' / '.join(details)}")
+                    pixta_result = pixta_upload(
+                        files=illust_files,
+                        progress_callback=log,
+                        skip_submit=self.test_mode,
+                        ai_filenames=ai_image_names,
+                    )
+                    log(f"[OK] Pixtaイラスト完了: アップロード{pixta_result['uploaded']}件 / 審査申請{pixta_result['submitted']}件")
                 except Exception as e:
-                    log(f"[NG] Pixta画像 エラー: {e}")
-                    failed_services.append("Pixta画像")
+                    log(f"[NG] Pixtaイラスト エラー: {e}")
+                    failed_services.append("Pixtaイラスト")
             else:
-                log("[!] Pixta画像アップロード対象がありません。スキップします。")
+                log("[!] Pixtaイラストアップロード対象がありません。スキップします。")
 
-        # ---- Pixta 動画 ----
-        if "pixta" in enabled_sites and video_targets and PIXTA_SESSION.exists():
-            try:
-                log("\n" + "─" * 40)
-                log(f"🎬 Pixta 動画アップロード開始: {len(video_targets)}件...")
-
-                # 工程1の結果から動画メタデータを取得（API再呼び出し不要）
-                saved_video_meta = self._get_saved_video_metadata(folder)
-
-                video_metadata = []
-                for vf in video_targets:
-                    meta = saved_video_meta.get(vf.name)
-                    if meta:
-                        title = meta.get("pixta_title_ja", vf.stem)
-                        tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
-                        log(f"  工程1の結果を使用: {vf.name} → {title[:40]}")
-                    else:
-                        log(f"  Geminiで動画解析中: {vf.name}...")
-                        stem = vf.stem
-                        filename_hint = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
-                        meta = analyze_video(vf, api_key, log, filename_hint=filename_hint)
-                        title = meta.get("pixta_title_ja", filename_hint)
-                        tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
-                        log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
-                    video_metadata.append({"title": title, "tags": tags})
-                footage_result = run_footage_upload(
-                    files=video_targets,
-                    metadata=video_metadata,
-                    progress_callback=log,
-                    skip_submit=self.test_mode,
-                )
-                log(f"[OK] Pixta動画完了: アップロード{footage_result['uploaded']}件 / 審査申請{footage_result['submitted']}件")
-            except Exception as e:
-                log(f"[NG] Pixta動画 エラー: {e}")
-                failed_services.append("Pixta動画")
-
-        # ---- Pixta ベクター: XMP埋込 → ZIP作成 → アップロード ----
-        vector_results = getattr(self, 'last_vector_results', [])
-        if "pixta" in enabled_sites and vector_results and PIXTA_SESSION.exists():
-            try:
-                log("\n" + "─" * 40)
-                log(f"🌸 Pixta Vector: XMP埋込 → ZIP作成 → アップロード...")
-                vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
-                if vector_zips:
-                    log(f"🌸 Pixta Vector ZIP アップロード開始: {len(vector_zips)}件...")
-                    vec_pixta_result = pixta_upload(files=vector_zips, progress_callback=log, skip_submit=self.test_mode)
-                    log(f"[OK] Pixta Vector 完了: アップロード{vec_pixta_result['uploaded']}件 / 審査申請{vec_pixta_result['submitted']}件")
-                else:
-                    log("[!] ZIP作成に失敗しました。")
-            except Exception as e:
-                log(f"[NG] Pixta Vector エラー: {e}")
-                failed_services.append("Pixta Vector")
-
-        # ---- AI素材の2パス処理（Adobe + Pixta のみ） ----
-        # ※ テストモード時にAdobe全選択でファイル形式変更が写真に影響しないよう、写真より先に処理
-        ai_files = get_ai_files(folder_path)
-        ai_adobe_csvs = sorted(csv_folder.glob("ai_adobe_stock_*.csv"),
-                               key=lambda f: f.stat().st_mtime, reverse=True)
-
-        if ai_files:
-            ai_targets_adobe = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-            ai_targets_pixta = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-
-            # AI → Adobe
-            if "adobe" in enabled_sites and ai_targets_adobe and ai_adobe_csvs and ADOBE_SESSION.exists():
+            # ---- 工程B: 動画（通常動画 + AI動画）----
+            all_videos = pixta_videos + ai_videos
+            video_targets = all_videos  # ファイル移動用
+            if all_videos:
                 try:
                     log("\n" + "─" * 40)
-                    log(f"🤖 Adobe Stock AI素材アップロード開始... ({len(ai_targets_adobe)}件)")
-                    ai_adobe_result = run_portal_automation(
-                        csv_path=ai_adobe_csvs[0],
-                        progress_callback=log,
-                        headless=False,
-                        files=ai_targets_adobe,
-                        confirm_submit_callback=lambda: not self.test_mode,
-                        is_ai=True,
-                    )
-                    log(f"[OK] Adobe AI素材 提出完了: {ai_adobe_result['submitted']}件")
-                except Exception as e:
-                    log(f"[NG] Adobe AI素材 エラー: {e}")
-                    failed_services.append("Adobe AI素材")
+                    log(f"🎬 Pixta 動画一括アップロード開始: {len(all_videos)}件...")
+                    if ai_videos:
+                        log(f"  内訳: 通常{len(pixta_videos)} / AI{len(ai_videos)}")
 
-            # AI → Pixta
-            if "pixta" in enabled_sites and ai_targets_pixta and PIXTA_SESSION.exists():
-                try:
-                    log("\n" + "─" * 40)
-                    log(f"🤖 Pixta AI素材アップロード開始... ({len(ai_targets_pixta)}件)")
-                    ai_pixta_result = pixta_upload(
-                        files=ai_targets_pixta,
+                    saved_video_meta = self._get_saved_video_metadata(folder)
+                    video_metadata = []
+                    for vf in all_videos:
+                        meta = saved_video_meta.get(vf.name)
+                        if meta:
+                            title = meta.get("pixta_title_ja", vf.stem)
+                            tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
+                            log(f"  工程1の結果を使用: {vf.name} → {title[:40]}")
+                        else:
+                            log(f"  Geminiで動画解析中: {vf.name}...")
+                            stem = vf.stem
+                            filename_hint = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
+                            meta = analyze_video(vf, api_key, log, filename_hint=filename_hint)
+                            title = meta.get("pixta_title_ja", filename_hint)
+                            tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
+                            log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
+                        video_metadata.append({"title": title, "tags": tags})
+
+                    ai_video_names = {f.name for f in ai_videos} if ai_videos else None
+                    footage_result = run_footage_upload(
+                        files=all_videos,
+                        metadata=video_metadata,
                         progress_callback=log,
                         skip_submit=self.test_mode,
-                        is_ai=True,
+                        ai_filenames=ai_video_names,
                     )
-                    log(f"[OK] Pixta AI素材 完了: アップロード{ai_pixta_result['uploaded']}件 / 審査申請{ai_pixta_result['submitted']}件")
+                    log(f"[OK] Pixta動画完了: アップロード{footage_result['uploaded']}件 / 審査申請{footage_result['submitted']}件")
                 except Exception as e:
-                    log(f"[NG] Pixta AI素材 エラー: {e}")
-                    failed_services.append("Pixta AI素材")
+                    log(f"[NG] Pixta動画 エラー: {e}")
+                    failed_services.append("Pixta動画")
 
-        # ---- 写真素材の2パス処理（Adobe=写真カテゴリ + SS + Pixta=写真ページ） ----
-        photo_files = get_photo_files(folder_path)
-        photo_adobe_csvs = sorted(csv_folder.glob("photo_adobe_stock_*.csv"),
-                                  key=lambda f: f.stat().st_mtime, reverse=True)
-        photo_ss_csvs = sorted(csv_folder.glob("photo_shutterstock_*.csv"),
-                               key=lambda f: f.stat().st_mtime, reverse=True)
-
-        if photo_files:
-            photo_targets = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-
-            # 写真 → Adobe（カテゴリ=写真）
-            if "adobe" in enabled_sites and photo_targets and photo_adobe_csvs and ADOBE_SESSION.exists():
+            # ---- 工程C: 写真ページ（写真のみ）----
+            if photo_images:
                 try:
                     log("\n" + "─" * 40)
-                    log(f"📷 Adobe Stock 写真アップロード開始... ({len(photo_targets)}件)")
-                    photo_adobe_result = run_portal_automation(
-                        csv_path=photo_adobe_csvs[0],
-                        progress_callback=log,
-                        headless=False,
-                        files=photo_targets,
-                        confirm_submit_callback=lambda: not self.test_mode,
-                        content_type="photo",
-                    )
-                    log(f"[OK] Adobe 写真 提出完了: {photo_adobe_result['submitted']}件")
-                except Exception as e:
-                    log(f"[NG] Adobe 写真 エラー: {e}")
-                    failed_services.append("Adobe 写真")
-
-            # 写真 → Shutterstock
-            if "shutterstock" in enabled_sites and photo_targets and photo_ss_csvs and SS_SESSION.exists():
-                try:
-                    log("\n" + "─" * 40)
-                    log(f"📷 Shutterstock 写真アップロード開始... ({len(photo_targets)}件)")
-                    photo_ss_result = ss_portal(
-                        csv_path=photo_ss_csvs[0],
-                        files=photo_targets,
-                        progress_callback=log,
-                        headless=False,
-                        skip_submit=self.test_mode,
-                    )
-                    log(f"[OK] Shutterstock 写真 提出完了: {photo_ss_result['submitted']}件")
-                except Exception as e:
-                    log(f"[NG] Shutterstock 写真 エラー: {e}")
-                    failed_services.append("Shutterstock 写真")
-
-            # 写真 → Pixta（写真ページ）
-            if "pixta" in enabled_sites and photo_targets and PIXTA_SESSION.exists():
-                try:
-                    log("\n" + "─" * 40)
-                    log(f"📷 Pixta 写真アップロード開始... ({len(photo_targets)}件)")
+                    log(f"📷 Pixta 写真アップロード開始... ({len(photo_images)}件)")
                     photo_pixta_result = pixta_upload(
-                        files=photo_targets,
+                        files=photo_images,
                         progress_callback=log,
                         skip_submit=self.test_mode,
                         is_photo=True,
@@ -1208,13 +1145,11 @@ class StockTaggerApp:
 
         csv_folder = folder_path / "csv_output"
         csvs = sorted(csv_folder.glob("adobe_stock_*.csv"), key=lambda f: f.stat().st_mtime, reverse=True)
-        photo_csvs = sorted(csv_folder.glob("photo_adobe_stock_*.csv"), key=lambda f: f.stat().st_mtime, reverse=True)
-        ai_csvs = sorted(csv_folder.glob("ai_adobe_stock_*.csv"), key=lambda f: f.stat().st_mtime, reverse=True)
-        if not csvs and not photo_csvs and not ai_csvs:
+        if not csvs:
             messagebox.showerror("エラー", "Adobe用CSVが見つかりません。先に工程1を実行してください。")
             return
 
-        csv_path = csvs[0] if csvs else None
+        csv_path = csvs[0]
 
         # --- 開始前確認ダイアログ ---
         all_targets = targets + photo_files + ai_files
@@ -1236,12 +1171,8 @@ class StockTaggerApp:
         self._disable_btn(self.adobe_btn)
         self._log("\n☁ Adobe Stock アップロード開始（ブラウザ直接アップロード）...", "info")
 
-        # ベクター EPS ファイルと CSV も準備
+        # ベクター EPS ファイルも準備
         vector_eps = get_vector_eps_files(folder_path)
-        vector_adobe_csvs = sorted(
-            (folder_path / "csv_output").glob("vector_adobe_*.csv"),
-            key=lambda f: f.stat().st_mtime, reverse=True
-        )
 
         def run():
             import time as _time
@@ -1249,62 +1180,44 @@ class StockTaggerApp:
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
 
             try:
-                # 通常ファイル
-                if targets and csv_path:
-                    log(f"対象ファイル: {len(targets)}件")
-                    log("\n🌐 Adobeポータルアップロード & 提出開始...")
+                # 全ファイルを統合（動画含む）
+                all_files = list(targets) + list(vector_eps) + list(ai_files) + list(photo_files)
+
+                # file_settings
+                file_settings = {}
+                for f in targets:
+                    file_settings[f.name] = {"content_type": "illustration", "is_ai": False}
+                for f in vector_eps:
+                    file_settings[f.name] = {"content_type": "illustration", "is_ai": False}
+                for f in ai_files:
+                    file_settings[f.name] = {"content_type": "illustration", "is_ai": True}
+                for f in photo_files:
+                    file_settings[f.name] = {"content_type": "photo", "is_ai": False}
+
+                if not all_files:
+                    log("[!] アップロード対象がありません。")
+                else:
+                    log(f"対象ファイル: {len(all_files)}件")
+                    details = []
+                    if targets:
+                        details.append(f"通常{len(targets)}")
+                    if vector_eps:
+                        details.append(f"ベクター{len(vector_eps)}")
+                    if ai_files:
+                        details.append(f"AI{len(ai_files)}")
+                    if photo_files:
+                        details.append(f"写真{len(photo_files)}")
+                    log(f"  内訳: {' / '.join(details)}")
+                    log("\n🌐 Adobeポータル一括アップロード & 提出開始...")
                     portal_result = run_portal_automation(
                         csv_path=csv_path,
                         progress_callback=log,
                         headless=False,
-                        files=targets,
+                        files=all_files,
                         confirm_submit_callback=lambda: not self.test_mode,
+                        file_settings=file_settings,
                     )
                     log(f"[OK] ポータル提出完了: {portal_result['submitted']}件")
-
-                # ベクター EPS
-                if vector_eps and vector_adobe_csvs:
-                    log(f"\n☁ Adobe Vector EPS アップロード開始... ({len(vector_eps)}件)")
-                    vec_result = run_portal_automation(
-                        csv_path=vector_adobe_csvs[0],
-                        progress_callback=log,
-                        headless=False,
-                        files=vector_eps,
-                        confirm_submit_callback=lambda: not self.test_mode,
-                    )
-                    log(f"[OK] Adobe Vector 提出完了: {vec_result['submitted']}件")
-                elif vector_eps:
-                    log("[!] Adobe Vector用CSVが見つかりません。工程1を先に実行してください。")
-
-                # AI素材（写真より先に処理：テストモード時の全選択影響を回避）
-                if ai_files and ai_csvs:
-                    ai_targets = [f for f in ai_files if f.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-                    if ai_targets:
-                        log(f"\n🤖 Adobe AI素材アップロード開始... ({len(ai_targets)}件)")
-                        ai_result = run_portal_automation(
-                            csv_path=ai_csvs[0],
-                            progress_callback=log,
-                            headless=False,
-                            files=ai_targets,
-                            confirm_submit_callback=lambda: not self.test_mode,
-                            is_ai=True,
-                        )
-                        log(f"[OK] Adobe AI素材 提出完了: {ai_result['submitted']}件")
-
-                # 写真素材（カテゴリ=写真）
-                if photo_files and photo_csvs:
-                    photo_targets = [f for f in photo_files if f.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-                    if photo_targets:
-                        log(f"\n📷 Adobe 写真アップロード開始... ({len(photo_targets)}件)")
-                        photo_result = run_portal_automation(
-                            csv_path=photo_csvs[0],
-                            progress_callback=log,
-                            headless=False,
-                            files=photo_targets,
-                            confirm_submit_callback=lambda: not self.test_mode,
-                            content_type="photo",
-                        )
-                        log(f"[OK] Adobe 写真 提出完了: {photo_result['submitted']}件")
 
                 _el = int(_time.time() - _step_start)
                 _m, _s = divmod(_el, 60)
@@ -1347,31 +1260,29 @@ class StockTaggerApp:
         csv_folder = folder_path / "csv_output"
         csvs = sorted(csv_folder.glob("shutterstock_*.csv"),
                       key=lambda f: f.stat().st_mtime, reverse=True)
-        photo_ss_csvs = sorted(csv_folder.glob("photo_shutterstock_*.csv"),
-                               key=lambda f: f.stat().st_mtime, reverse=True)
 
-        from stock_tagger import get_photo_files as _get_photo_files
+        from stock_tagger import get_photo_files as _get_photo_files, UPLOAD_VIDEO_EXTENSIONS
         ss_targets = get_upload_targets(folder_path, "shutterstock")
         photo_files = _get_photo_files(folder_path)
 
-        if not csvs and not photo_ss_csvs:
+        if not csvs:
             messagebox.showerror("エラー", "Shutterstock用CSVが見つかりません。先に工程1を実行してください。")
             return
 
-        if not ss_targets and not photo_files:
+        # ベクター EPS ファイルも準備
+        vector_eps_ss = get_vector_eps_files(folder_path)
+
+        # 全SSファイルを統合（通常 + ベクター + 写真、AI除外）
+        photo_ss_files = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+        all_ss_files = list(ss_targets) + list(vector_eps_ss) + photo_ss_files
+
+        if not all_ss_files:
             messagebox.showerror("エラー", "Shutterstockにアップロード対象のファイルがありません。")
             return
 
-        csv_path = csvs[0] if csvs else None
+        csv_path = csvs[0]
 
-        # ベクター EPS ファイルと CSV も準備
-        vector_eps_ss = get_vector_eps_files(folder_path)
-        vector_ss_csvs = sorted(
-            (folder_path / "csv_output").glob("vector_shutterstock_*.csv"),
-            key=lambda f: f.stat().st_mtime, reverse=True
-        )
-
-        all_targets = ss_targets + photo_files
+        all_targets = all_ss_files
         # --- 開始前確認ダイアログ ---
         file_list = "\n".join(f"  {f.name}" for f in all_targets[:10])
         if len(all_targets) > 10:
@@ -1396,49 +1307,27 @@ class StockTaggerApp:
             _step_start = _time.time()
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
             try:
-                # 通常ファイル
-                if ss_targets and csv_path:
-                    log(f"対象ファイル: {len(ss_targets)}件")
-                    portal_result = ss_portal(
-                        csv_path=csv_path,
-                        files=ss_targets,
-                        progress_callback=log,
-                        headless=False,
-                        skip_submit=self.test_mode,
-                    )
-                    log(f"[OK] Shutterstock ポータル提出完了！")
-                    if portal_result["errors"]:
-                        for e in portal_result["errors"]:
-                            log(f"  [NG] {e}")
+                log(f"対象ファイル: {len(all_ss_files)}件")
+                details = []
+                if ss_targets:
+                    details.append(f"通常{len(ss_targets)}")
+                if vector_eps_ss:
+                    details.append(f"ベクター{len(vector_eps_ss)}")
+                if photo_ss_files:
+                    details.append(f"写真{len(photo_ss_files)}")
+                log(f"  内訳: {' / '.join(details)}")
 
-                # ベクター EPS
-                if vector_eps_ss and vector_ss_csvs:
-                    log(f"\n☁ Shutterstock Vector EPS アップロード開始... ({len(vector_eps_ss)}件)")
-                    vec_ss = ss_portal(
-                        csv_path=vector_ss_csvs[0],
-                        files=vector_eps_ss,
-                        progress_callback=log,
-                        headless=False,
-                        skip_submit=self.test_mode,
-                    )
-                    log(f"[OK] Shutterstock Vector 提出完了: {vec_ss['submitted']}件")
-                elif vector_eps_ss:
-                    log("[!] Shutterstock Vector用CSVが見つかりません。工程1を先に実行してください。")
-
-                # 写真素材
-                if photo_files and photo_ss_csvs:
-                    photo_targets = [f for f in photo_files if f.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-                    if photo_targets:
-                        log(f"\n📷 Shutterstock 写真アップロード開始... ({len(photo_targets)}件)")
-                        photo_ss = ss_portal(
-                            csv_path=photo_ss_csvs[0],
-                            files=photo_targets,
-                            progress_callback=log,
-                            headless=False,
-                            skip_submit=self.test_mode,
-                        )
-                        log(f"[OK] Shutterstock 写真 提出完了: {photo_ss['submitted']}件")
-
+                portal_result = ss_portal(
+                    csv_path=csv_path,
+                    files=all_ss_files,
+                    progress_callback=log,
+                    headless=False,
+                    skip_submit=self.test_mode,
+                )
+                log(f"[OK] Shutterstock ポータル提出完了！")
+                if portal_result["errors"]:
+                    for e in portal_result["errors"]:
+                        log(f"  [NG] {e}")
 
                 _el = int(_time.time() - _step_start)
                 _m, _s = divmod(_el, 60)
@@ -1526,26 +1415,62 @@ class StockTaggerApp:
             _step_start = _time.time()
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
             try:
-                if image_targets:
-                    log(f"画像アップロード: {len(image_targets)}件...")
-                    img_result = pixta_upload(files=image_targets, progress_callback=log, skip_submit=self.test_mode)
-                    log(f"[OK] 画像完了: アップロード{img_result['uploaded']}件 / 審査申請{img_result['submitted']}件")
+                # ファイル収集
+                ai_images = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
+                ai_videos = [f for f in ai_files if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
+                photo_img = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
 
-                if video_targets:
-                    log(f"\n🎬 動画アップロード: {len(video_targets)}件...")
+                # ベクターZIP
+                vector_zips = []
+                if vector_results:
+                    try:
+                        vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
+                    except Exception as e:
+                        log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
 
-                    # 工程1の結果から動画メタデータを取得（API再呼び出し不要）
+                # ---- 工程A: イラストページ（通常画像 + ベクターZIP + AI画像）----
+                illust_files = image_targets + vector_zips + ai_images
+                ai_image_names = {f.name for f in ai_images} if ai_images else None
+
+                if illust_files:
+                    log("\n" + "─" * 40)
+                    log(f"🌸 Pixta イラスト一括アップロード開始: {len(illust_files)}件...")
+                    details = []
+                    if image_targets:
+                        details.append(f"通常{len(image_targets)}")
+                    if vector_zips:
+                        details.append(f"ベクター{len(vector_zips)}")
+                    if ai_images:
+                        details.append(f"AI{len(ai_images)}")
+                    log(f"  内訳: {' / '.join(details)}")
+                    illust_result = pixta_upload(
+                        files=illust_files,
+                        progress_callback=log,
+                        skip_submit=self.test_mode,
+                        ai_filenames=ai_image_names,
+                    )
+                    log(f"[OK] Pixtaイラスト完了: アップロード{illust_result['uploaded']}件 / 審査申請{illust_result['submitted']}件")
+                else:
+                    log("[!] Pixtaイラストアップロード対象がありません。スキップします。")
+
+                # ---- 工程B: 動画（通常動画 + AI動画）----
+                all_videos = video_targets + ai_videos
+                if all_videos:
+                    log("\n" + "─" * 40)
+                    log(f"🎬 Pixta 動画一括アップロード開始: {len(all_videos)}件...")
+                    if ai_videos:
+                        log(f"  内訳: 通常{len(video_targets)} / AI{len(ai_videos)}")
+
                     saved_video_meta = self._get_saved_video_metadata(folder)
-
                     video_metadata = []
-                    for vf in video_targets:
+                    for vf in all_videos:
                         meta = saved_video_meta.get(vf.name)
                         if meta:
                             title = meta.get("pixta_title_ja", vf.stem)
                             tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
                             log(f"  工程1の結果を使用: {vf.name} → {title[:40]}")
                         else:
-                            log(f"  Gemini解析中: {vf.name}...")
+                            log(f"  Geminiで動画解析中: {vf.name}...")
                             stem = vf.stem
                             filename_hint = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
                             meta = analyze_video(vf, api_key, log, filename_hint=filename_hint)
@@ -1553,34 +1478,28 @@ class StockTaggerApp:
                             tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
                             log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
                         video_metadata.append({"title": title, "tags": tags})
-                    vid_result = run_footage_upload(files=video_targets, metadata=video_metadata, progress_callback=log, skip_submit=self.test_mode)
-                    log(f"[OK] 動画完了: アップロード{vid_result['uploaded']}件 / 審査申請{vid_result['submitted']}件")
 
-                if vector_results:
-                    log(f"\n🌸 Pixta Vector: XMP埋込 → ZIP作成 → アップロード...")
-                    vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
-                    if vector_zips:
-                        log(f"🌸 Pixta Vector ZIP アップロード: {len(vector_zips)}件...")
-                        vec_result = pixta_upload(files=vector_zips, progress_callback=log, skip_submit=self.test_mode)
-                        log(f"[OK] Vector完了: アップロード{vec_result['uploaded']}件 / 審査申請{vec_result['submitted']}件")
-                    else:
-                        log("[!] Vector ZIP作成に失敗しました。")
+                    ai_video_names = {f.name for f in ai_videos} if ai_videos else None
+                    footage_result = run_footage_upload(
+                        files=all_videos,
+                        metadata=video_metadata,
+                        progress_callback=log,
+                        skip_submit=self.test_mode,
+                        ai_filenames=ai_video_names,
+                    )
+                    log(f"[OK] Pixta動画完了: アップロード{footage_result['uploaded']}件 / 審査申請{footage_result['submitted']}件")
 
-                # 写真素材（写真ページ）
-                if photo_files:
-                    photo_img = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-                    if photo_img:
-                        log(f"\n📷 Pixta 写真アップロード開始... ({len(photo_img)}件)")
-                        photo_result = pixta_upload(files=photo_img, progress_callback=log, skip_submit=self.test_mode, is_photo=True)
-                        log(f"[OK] Pixta 写真 完了: アップロード{photo_result['uploaded']}件 / 審査申請{photo_result['submitted']}件")
-
-                # AI素材
-                if ai_files:
-                    ai_img = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-                    if ai_img:
-                        log(f"\n🤖 Pixta AI素材アップロード開始... ({len(ai_img)}件)")
-                        ai_result = pixta_upload(files=ai_img, progress_callback=log, skip_submit=self.test_mode, is_ai=True)
-                        log(f"[OK] Pixta AI素材 完了: アップロード{ai_result['uploaded']}件 / 審査申請{ai_result['submitted']}件")
+                # ---- 工程C: 写真ページ（写真のみ）----
+                if photo_img:
+                    log("\n" + "─" * 40)
+                    log(f"📷 Pixta 写真アップロード開始... ({len(photo_img)}件)")
+                    photo_result = pixta_upload(
+                        files=photo_img,
+                        progress_callback=log,
+                        skip_submit=self.test_mode,
+                        is_photo=True,
+                    )
+                    log(f"[OK] Pixta 写真 完了: アップロード{photo_result['uploaded']}件 / 審査申請{photo_result['submitted']}件")
 
                 _el = int(_time.time() - _step_start)
                 _m, _s = divmod(_el, 60)

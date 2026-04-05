@@ -222,72 +222,70 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # STEP 5: 画像を審査提出
             # ============================================================
             if skip_submit:
-                log("[テストモード] 審査提出ボタンの手前で停止します。手動で提出ボタンを押してください。")
-                context.close()
-                return {"submitted": 0, "errors": errors}
+                log("[テストモード] 審査提出ボタンの手前で停止します。ブラウザで手動操作してください。")
+            else:
+                log("画像: 審査提出中...")
+                submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
+                try:
+                    submit_btn.wait_for(state="visible", timeout=8000)
+                    submit_btn.click()
+                    time.sleep(4)
+                except PWTimeout:
+                    log("[NG] 提出ボタンが見つかりません")
 
-            log("画像: 審査提出中...")
-            submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
-            try:
-                submit_btn.wait_for(state="visible", timeout=8000)
-                submit_btn.click()
+                try:
+                    tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
+                    if "(0)" in tab_text:
+                        log("[OK] 画像: 全件提出完了")
+                    else:
+                        log(f"[!] 画像: 未提出が残っています: {tab_text}")
+                except PWTimeout:
+                    log("[!] 画像: 提出後の確認ができませんでした")
+
+                submitted_photo = submitted
+                submitted += 1  # カウントは概算
+
+                # ============================================================
+                # STEP 6: 動画タブに切り替えて提出
+                # ============================================================
+                log("\n動画タブに切り替え中...")
+                page.goto(VIDEO_URL, wait_until="domcontentloaded", timeout=30000)
                 time.sleep(4)
-            except PWTimeout:
-                log("[NG] 提出ボタンが見つかりません")
+                _close_popups(page)
 
-            try:
-                tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                if "(0)" in tab_text:
-                    log("[OK] 画像: 全件提出完了")
-                else:
-                    log(f"[!] 画像: 未提出が残っています: {tab_text}")
-            except PWTimeout:
-                log("[!] 画像: 提出後の確認ができませんでした")
+                try:
+                    tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
+                    log(f"動画 not_submitted: {tab_text}")
+                    if "(0)" in tab_text:
+                        log("未提出動画なし。スキップ")
+                    else:
+                        log("動画: 全選択して提出...")
+                        try:
+                            page.locator('input[type="checkbox"]').first.wait_for(state="visible", timeout=15000)
+                        except PWTimeout:
+                            log("[!] 動画チェックボックスが見つかりません")
+                        _select_all(page, log)
 
-            submitted_photo = submitted
-            submitted += 1  # カウントは概算
+                        submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
+                        try:
+                            submit_btn.wait_for(state="visible", timeout=8000)
+                            submit_btn.click()
+                            time.sleep(4)
+                            log("[OK] 動画: 提出ボタンクリック完了")
+                        except PWTimeout:
+                            log("[NG] 動画: 提出ボタンが見つかりません")
 
-            # ============================================================
-            # STEP 6: 動画タブに切り替えて提出
-            # ============================================================
-            log("\n動画タブに切り替え中...")
-            page.goto(VIDEO_URL, wait_until="domcontentloaded", timeout=30000)
-            time.sleep(4)
-            _close_popups(page)
+                        try:
+                            tab_text_after = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
+                            if "(0)" in tab_text_after:
+                                log("[OK] 動画: 全件提出完了")
+                            else:
+                                log(f"[!] 動画: 未提出が残っています: {tab_text_after}")
+                        except PWTimeout:
+                            log("[!] 動画: 提出後の確認ができませんでした")
 
-            try:
-                tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                log(f"動画 not_submitted: {tab_text}")
-                if "(0)" in tab_text:
-                    log("未提出動画なし。スキップ")
-                else:
-                    log("動画: 全選択して提出...")
-                    try:
-                        page.locator('input[type="checkbox"]').first.wait_for(state="visible", timeout=15000)
-                    except PWTimeout:
-                        log("[!] 動画チェックボックスが見つかりません")
-                    _select_all(page, log)
-
-                    submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
-                    try:
-                        submit_btn.wait_for(state="visible", timeout=8000)
-                        submit_btn.click()
-                        time.sleep(4)
-                        log("[OK] 動画: 提出ボタンクリック完了")
-                    except PWTimeout:
-                        log("[NG] 動画: 提出ボタンが見つかりません")
-
-                    try:
-                        tab_text_after = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                        if "(0)" in tab_text_after:
-                            log("[OK] 動画: 全件提出完了")
-                        else:
-                            log(f"[!] 動画: 未提出が残っています: {tab_text_after}")
-                    except PWTimeout:
-                        log("[!] 動画: 提出後の確認ができませんでした")
-
-            except PWTimeout:
-                log("[!] 動画: not_submittedタブの確認ができませんでした")
+                except PWTimeout:
+                    log("[!] 動画: not_submittedタブの確認ができませんでした")
 
         except Exception as e:
             log(f"[NG] Error: {e}")
@@ -300,11 +298,16 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
                 try:
-                    while browser.is_connected() and context.pages:
-                        time.sleep(3)
+                    page.wait_for_event("close", timeout=7200000)
                 except Exception:
                     pass
                 log("ブラウザが閉じられました。")
+                try:
+                    if browser.is_connected():
+                        context.close()
+                        browser.close()
+                except Exception:
+                    pass
 
     return {"submitted": submitted, "errors": errors}
 

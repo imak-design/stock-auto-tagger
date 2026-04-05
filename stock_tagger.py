@@ -1317,33 +1317,22 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 通常素材のCSV
-    if results:
+    # Adobe用CSV（通常 + 写真 + AI 全素材を1つに統合）
+    all_adobe_results = results + photo_results + ai_results
+    if all_adobe_results:
         adobe_path = csv_folder / f"adobe_stock_{timestamp}.csv"
+        write_adobe_stock_csv(all_adobe_results, adobe_path)
+
+    # Shutterstock用CSV（通常 + 写真を1つに統合、AI除外）
+    all_ss_results = results + photo_results
+    if all_ss_results:
         shutter_path = csv_folder / f"shutterstock_{timestamp}.csv"
-        write_adobe_stock_csv(results, adobe_path)
-        write_shutterstock_csv(results, shutter_path)
-
-    # 写真素材のCSV（3サイト全部）
-    if photo_results:
-        photo_adobe_path = csv_folder / f"photo_adobe_stock_{timestamp}.csv"
-        photo_shutter_path = csv_folder / f"photo_shutterstock_{timestamp}.csv"
-        write_adobe_stock_csv(photo_results, photo_adobe_path)
-        write_shutterstock_csv(photo_results, photo_shutter_path)
-
-    # AI素材のCSV（Shutterstock不要）
-    if ai_results:
-        ai_adobe_path = csv_folder / f"ai_adobe_stock_{timestamp}.csv"
-        write_adobe_stock_csv(ai_results, ai_adobe_path)
+        write_shutterstock_csv(all_ss_results, shutter_path)
 
     if progress_callback:
         progress_callback(f"\nCSV出力完了 → {csv_folder}")
-        if results:
-            progress_callback(f"  通常素材: {len(results)}件")
-        if photo_results:
-            progress_callback(f"  写真素材: {len(photo_results)}件")
-        if ai_results:
-            progress_callback(f"  AI素材: {len(ai_results)}件")
+        progress_callback(f"  Adobe統合CSV: {len(all_adobe_results)}件（通常{len(results)} / 写真{len(photo_results)} / AI{len(ai_results)}）")
+        progress_callback(f"  SS統合CSV: {len(all_ss_results)}件（通常{len(results)} / 写真{len(photo_results)}）")
 
     # Pixta用メタデータ埋め込み（通常 + 写真 + AI全部）
     all_results = results + photo_results + ai_results

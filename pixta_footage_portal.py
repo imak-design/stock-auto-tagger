@@ -14,6 +14,61 @@ SESSION_FILE = Path(__file__).parent / "pixta_session.json"
 UPLOAD_URL = "https://pixta.jp/mypage/upload/new_footage"
 
 
+def _check_ai_generated_on_list(page, log, ai_filenames=None):
+    """
+    アップロードページのペンディングリストでAI生成チェックボックスをONにする。
+    ai_filenames: Noneなら全件チェック、setならファイル名が一致するもののみチェック。
+    """
+    ai_checkboxes = page.locator("input.is_ai_generated")
+    count = ai_checkboxes.count()
+    if count == 0:
+        log("[!] AI生成チェックボックスが見つかりません")
+        return
+
+    if ai_filenames is None:
+        log(f">> AI生成チェックボックスを {count} 件ONにします...")
+        for i in range(count):
+            cb = ai_checkboxes.nth(i)
+            try:
+                if not cb.is_checked():
+                    cb.click(force=True)
+                    time.sleep(0.3)
+            except Exception as e:
+                log(f"  [!] チェックボックス {i+1} の操作に失敗: {e}")
+    else:
+        # ai_filenamesを小文字のstem(拡張子なし)セットに変換（Pixtaはファイル名を小文字化するため）
+        from pathlib import PurePosixPath as _PurePath
+        ai_stems_lower = {_PurePath(f).stem.lower() for f in ai_filenames}
+        log(f">> AI生成チェックボックスを選択的にONにします（対象: {len(ai_filenames)}件, stems={ai_stems_lower}）...")
+        for i in range(count):
+            cb = ai_checkboxes.nth(i)
+            try:
+                # チェックボックスのid (例: "16911052-is_ai_generated") からアイテムIDを取得し、
+                # {itemId}-filename のテキストからファイル名を取得
+                item_id = cb.evaluate("el => (el.id || '').replace('-is_ai_generated', '')")
+                filename_raw = ""
+                if item_id:
+                    fn_el = page.locator(f'[id="{item_id}-filename"]')
+                    if fn_el.count() > 0:
+                        filename_raw = fn_el.inner_text(timeout=3000).strip()
+                # stemを抽出（パス区切り後の最後の部分から拡張子除去、小文字化）
+                filename_part = filename_raw.split("/")[-1].strip() if filename_raw else ""
+                stem = _PurePath(filename_part).stem.lower() if filename_part else ""
+                log(f"  [{item_id}] filename='{filename_raw}' → stem='{stem}'")
+                if stem and stem in ai_stems_lower:
+                    if not cb.is_checked():
+                        cb.click(force=True)
+                        time.sleep(0.3)
+                        log(f"  {filename_raw}: AI生成チェックON")
+                elif not filename_raw:
+                    log(f"  [!] アイテム{i+1}: ファイル名取得できず、スキップ")
+            except Exception as e:
+                log(f"  [!] チェックボックス {i+1} の操作に失敗: {e}")
+
+    checked = page.locator("input.is_ai_generated:checked").count()
+    log(f"[OK] AI生成チェックボックス: {checked}/{count} ON")
+
+
 def _launch(p):
     """ブラウザ・コンテキスト共通設定"""
     browser = p.chromium.launch(
@@ -36,6 +91,8 @@ def run_footage_upload(
     metadata: list,
     progress_callback=None,
     skip_submit: bool = False,
+    is_ai: bool = False,
+    ai_filenames: set = None,
 ) -> dict:
     """
     Pixta 動画アップロード → タイトル/タグ入力 → 審査申請 を全自動で実行する。
@@ -106,7 +163,7 @@ def run_footage_upload(
             # Phase 1: ファイルアップロード
             # -------------------------------------------------------
             log("Opening Pixta footage upload page...")
-            page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=30000)
+            page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=60000)
             time.sleep(3)
 
             if "sign_in" in page.url or "login" in page.url:
@@ -171,10 +228,11 @@ def run_footage_upload(
             import platform as _platform
             _is_mac = _platform.system() == "Darwin"
 
-            # metadataをファイル名（stem）→メタ のdictに変換
+            # metadataをファイル名（stem, 小文字）→メタ のdictに変換
+            # ※ Pixtaはファイル名を小文字化するため、照合も小文字で行う
             meta_by_stem = {}
             for vf, m in zip(files, metadata):
-                stem = Path(vf).stem
+                stem = Path(vf).stem.lower()
                 meta_by_stem[stem] = m
 
             # ページ上のアイテムIDを取得してファイル名と照合
@@ -191,9 +249,9 @@ def run_footage_upload(
                     log(f"[{item_id}] [!] Could not read filename, skipping")
                     continue
 
-                # stemを抽出（パス区切り後の最後の部分から拡張子除去）
+                # stemを抽出（パス区切り後の最後の部分から拡張子除去、小文字化）
                 filename_part = filename_raw.split("/")[-1].strip()
-                stem = Path(filename_part).stem
+                stem = Path(filename_part).stem.lower()
 
                 meta = meta_by_stem.get(stem)
                 if not meta:
@@ -246,6 +304,10 @@ def run_footage_upload(
             # -------------------------------------------------------
             # Phase 3: 審査申請
             # -------------------------------------------------------
+            # AI生成チェックボックスをON
+            if is_ai or ai_filenames:
+                _check_ai_generated_on_list(page, log, ai_filenames=ai_filenames)
+
             if skip_submit:
                 log("[テストモード] 審査申請をスキップしました。ブラウザを閉じると次の処理に進みます。")
             else:
@@ -297,6 +359,19 @@ def run_footage_upload(
                 confirm_btn.click()
                 log("Clicked 審査申請 button")
 
+                # AI生成確認モーダルの処理
+                if is_ai or ai_filenames:
+                    try:
+                        modal = page.locator("div.modal-ai-generated-submit")
+                        modal.wait_for(state="visible", timeout=5000)
+                        log("AI生成確認モーダルが表示されました")
+                        submit_continue = page.locator("#submit-continue")
+                        submit_continue.click()
+                        log("[OK] モーダルの続行ボタンをクリック")
+                        time.sleep(3)
+                    except PWTimeout:
+                        log("(AI生成モーダルは表示されませんでした)")
+
                 time.sleep(5)
                 log(f"Final URL: {page.url}")
 
@@ -318,11 +393,16 @@ def run_footage_upload(
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
                 try:
-                    while browser.is_connected() and context.pages:
-                        time.sleep(3)
+                    page.wait_for_event("close", timeout=7200000)
                 except Exception:
                     pass
                 log("ブラウザが閉じられました。")
+                try:
+                    if browser.is_connected():
+                        context.close()
+                        browser.close()
+                except Exception:
+                    pass
 
     return {"uploaded": uploaded, "submitted": submitted, "errors": errors}
 

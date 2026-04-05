@@ -15,22 +15,61 @@ UPLOAD_URL = "https://pixta.jp/mypage/upload/illustration#per_page=100&sort=4"
 UPLOAD_URL_PHOTO = "https://pixta.jp/mypage/upload/photo#per_page=100&sort=4"
 
 
-def _check_ai_generated_on_list(page, log):
-    """アップロードページのペンディングリストで各素材のAI生成チェックボックスをONにする。"""
+def _check_ai_generated_on_list(page, log, ai_filenames=None):
+    """
+    アップロードページのペンディングリストでAI生成チェックボックスをONにする。
+    ai_filenames: Noneなら全件チェック、setならファイル名が一致するもののみチェック。
+    """
     ai_checkboxes = page.locator("input.is_ai_generated")
     count = ai_checkboxes.count()
     if count == 0:
         log("[!] AI生成チェックボックスが見つかりません")
         return
-    log(f">> AI生成チェックボックスを {count} 件ONにします...")
-    for i in range(count):
-        cb = ai_checkboxes.nth(i)
-        try:
-            if not cb.is_checked():
-                cb.click(force=True)
-                time.sleep(0.3)
-        except Exception as e:
-            log(f"  [!] チェックボックス {i+1} の操作に失敗: {e}")
+
+    if ai_filenames is None:
+        # 全件チェック（後方互換）
+        log(f">> AI生成チェックボックスを {count} 件ONにします...")
+        for i in range(count):
+            cb = ai_checkboxes.nth(i)
+            try:
+                if not cb.is_checked():
+                    cb.click(force=True)
+                    time.sleep(0.3)
+            except Exception as e:
+                log(f"  [!] チェックボックス {i+1} の操作に失敗: {e}")
+    else:
+        # 選択的チェック: ファイル名がai_filenamesに含まれるもののみ
+        log(f">> AI生成チェックボックスを選択的にONにします（対象: {len(ai_filenames)}件）...")
+        for i in range(count):
+            cb = ai_checkboxes.nth(i)
+            try:
+                # チェックボックスのid (例: "131463966-is_ai_generated") からアイテムIDを取得し、
+                # 対応する div#<id>-checkbox-field 内の span からファイル名を取得
+                filename = cb.evaluate("""(el) => {
+                    let cbId = el.id || '';
+                    let itemId = cbId.replace('-is_ai_generated', '');
+                    if (itemId) {
+                        let header = document.getElementById(itemId + '-checkbox-field');
+                        if (header) {
+                            let spans = header.querySelectorAll('span');
+                            for (let s of spans) {
+                                let t = s.textContent.trim();
+                                if (t.match(/\\.(png|jpg|jpeg|gif|eps|zip|mp4|mov|ai)$/i)) return t;
+                            }
+                        }
+                    }
+                    return '';
+                }""")
+                if filename and filename in ai_filenames:
+                    if not cb.is_checked():
+                        cb.click(force=True)
+                        time.sleep(0.3)
+                        log(f"  {filename}: AI生成チェックON")
+                elif not filename:
+                    log(f"  [!] アイテム{i+1}: ファイル名取得できず、スキップ")
+            except Exception as e:
+                log(f"  [!] チェックボックス {i+1} の操作に失敗: {e}")
+
     checked = page.locator("input.is_ai_generated:checked").count()
     log(f"[OK] AI生成チェックボックス: {checked}/{count} ON")
 
@@ -52,7 +91,7 @@ def _launch(p):
     return browser, context
 
 
-def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool = False, is_ai: bool = False, is_photo: bool = False) -> dict:
+def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool = False, is_ai: bool = False, is_photo: bool = False, ai_filenames: set = None) -> dict:
     """
     Pixta イラストアップロード → 審査申請 を全自動で実行する。
 
@@ -103,19 +142,19 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
     uploaded = 0
     submitted = 0
 
+    url = UPLOAD_URL_PHOTO if is_photo else UPLOAD_URL
+
     with sync_playwright() as p:
         browser, context = _launch(p)
         page = context.new_page()
         _keep_open = skip_submit
-
-        url = UPLOAD_URL_PHOTO if is_photo else UPLOAD_URL
 
         try:
             # -------------------------------------------------------
             # Phase 1: ファイルアップロード
             # -------------------------------------------------------
             log(f"Opening Pixta upload page ({'写真' if is_photo else 'イラスト'})...")
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(3)
 
             if "sign_in" in page.url or "login" in page.url:
@@ -196,7 +235,7 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
 
             # per_page=100で再読み込みして全件表示
             log("Reloading with per_page=100 to show all items...")
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5)
 
             # ペンディングリストに件数が増えるまで待機
@@ -215,7 +254,7 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                 items_now = page.locator("input.submit_items").count()
                 log(f"[!] Expected {expected_total} items, got {items_now}. 再読み込みで再試行...")
                 for retry in range(6):
-                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     time.sleep(5)
                     items_now = page.locator("input.submit_items").count()
                     if items_now >= expected_total:
@@ -237,8 +276,8 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                 log(f"--- ページ {page_num} の処理 ---")
 
                 # AI素材: 全選択の前に各アイテムのAI生成チェックボックスをON
-                if is_ai:
-                    _check_ai_generated_on_list(page, log)
+                if is_ai or ai_filenames:
+                    _check_ai_generated_on_list(page, log, ai_filenames=ai_filenames)
 
                 all_cb = page.locator("#all-1")
                 try:
@@ -331,7 +370,7 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                     log("Clicked 審査申請 button")
 
                 # AI生成モーダルが表示された場合の処理
-                if is_ai:
+                if is_ai or ai_filenames:
                     try:
                         modal = page.locator("div.modal-ai-generated-submit")
                         modal.wait_for(state="visible", timeout=5000)
@@ -364,11 +403,16 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
                 try:
-                    while browser.is_connected() and context.pages:
-                        time.sleep(3)
+                    page.wait_for_event("close", timeout=7200000)
                 except Exception:
                     pass
                 log("ブラウザが閉じられました。")
+                try:
+                    if browser.is_connected():
+                        context.close()
+                        browser.close()
+                except Exception:
+                    pass
 
     return {"uploaded": uploaded, "submitted": submitted, "errors": errors}
 
@@ -403,15 +447,15 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
     errors = []
     submitted = 0
 
+    url = UPLOAD_URL_PHOTO if is_photo else UPLOAD_URL
+
     with sync_playwright() as p:
         browser, context = _launch(p)
         page = context.new_page()
 
-        url = UPLOAD_URL_PHOTO if is_photo else UPLOAD_URL
-
         try:
             log(f"Opening Pixta upload page ({'写真' if is_photo else 'イラスト'})...")
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(3)
 
             if "sign_in" in page.url or "login" in page.url:
@@ -507,8 +551,6 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
             else:
                 confirm_btn.click()
                 log("Clicked 審査申請 button")
-            time.sleep(5)
-            log(f"Final URL: {page.url}")
 
             # AI生成モーダルが表示された場合の処理
             if is_ai:
@@ -522,6 +564,9 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
                     time.sleep(3)
                 except PWTimeout:
                     log("(AI生成モーダルは表示されませんでした)")
+
+            time.sleep(5)
+            log(f"Final URL: {page.url}")
 
             if "confirm_complete" in page.url or "complete" in page.url or "manager" in page.url:
                 submitted = checked_count
