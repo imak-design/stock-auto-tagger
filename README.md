@@ -110,9 +110,9 @@ cp config.example.json config.json
 | `Photo/` | 写真素材 | Adobe で写真カテゴリ、Pixta で写真ページにアップしたい人 |
 | `Vector/` | ベクター素材（EPS + PNG） | EPS ファイルをアップロードする人 |
 
-- 通常のイラスト素材は `input_folder` 直下にそのまま入れてください
+- 通常のイラスト・動画素材は `input_folder` 直下にそのまま入れてください
 - 必要なフォルダだけ作れば OK です（全部作る必要はありません）
-- Vector フォルダ内は素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください
+- Vector フォルダ内は素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください（例: `Vector/260405_crown_vector/` に `.eps` と `.png`）
 
 ### 5. Gemini API キーの設定
 
