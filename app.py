@@ -1394,11 +1394,11 @@ class StockTaggerApp:
         image_targets = [f for f in all_targets if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
         video_targets = [f for f in all_targets if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
 
-        if not all_targets and not ai_files and not photo_files:
+        vector_results = getattr(self, 'last_vector_results', [])
+
+        if not all_targets and not ai_files and not photo_files and not vector_results:
             messagebox.showinfo("確認", "Pixtaアップロード対象のファイルが見つかりません。")
             return
-
-        vector_results = getattr(self, 'last_vector_results', [])
 
         # --- 開始前確認ダイアログ ---
         confirm_targets = list(all_targets) + photo_files + ai_files
