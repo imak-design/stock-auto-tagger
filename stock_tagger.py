@@ -828,7 +828,20 @@ def embed_eps_xmp(eps_path: Path, title: str, keywords: list):
         if insert_point != -1:
             text = text[:insert_point] + '      ' + new_subject + '\n' + text[insert_point:]
 
-    ps_data_new = text.encode("latin-1")
+    # XMP部分はUTF-8を含むのでlatin-1では不可。
+    # XMPパケット内だけUTF-8エンコードし、それ以外はlatin-1のまま保持する。
+    xmp_start_marker = '<?xpacket begin='
+    xmp_end_marker = '<?xpacket end='
+    xmp_start = text.find(xmp_start_marker)
+    xmp_end = text.find(xmp_end_marker)
+    if xmp_start != -1 and xmp_end != -1:
+        xmp_end = text.index('?>', xmp_end) + 2  # <?xpacket end="w"?> の末尾
+        before = text[:xmp_start].encode("latin-1")
+        xmp_part = text[xmp_start:xmp_end].encode("utf-8")
+        after = text[xmp_end:].encode("latin-1")
+        ps_data_new = before + xmp_part + after
+    else:
+        ps_data_new = text.encode("latin-1", errors="xmlcharrefreplace")
 
     if binary_header:
         new_ps_length = len(ps_data_new)
