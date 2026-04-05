@@ -739,7 +739,7 @@ class StockTaggerApp:
 
     def _run_processing(self, folder: str, api_key: str):
         if self.test_mode:
-            self.root.after(0, lambda: self._log("⚠ テストモードで実行中（審査申請はスキップされます）\n   v3: AI/写真フォルダ対応 / 3パス処理 / テストモード移動スキップ", "error"))
+            self.root.after(0, lambda: self._log("⚠ テストモードで実行中（審査申請はスキップされます）", "error"))
         try:
             total_files = [0]
 
