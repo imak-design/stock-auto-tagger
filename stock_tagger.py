@@ -101,7 +101,7 @@ VIDEO_PROMPT = _load_prompt("video_prompt.txt")
 # Gemini API（直接REST呼び出し）
 # ============================================================
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -1540,8 +1540,8 @@ def process_vector_files(input_folder: str, api_key: str, progress_callback=None
 
     if results:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        adobe_csv = csv_folder / f"vector_adobe_{timestamp}.csv"
-        ss_csv = csv_folder / f"vector_shutterstock_{timestamp}.csv"
+        adobe_csv = csv_folder / f"adobe_stock_vector_{timestamp}.csv"
+        ss_csv = csv_folder / f"shutterstock_vector_{timestamp}.csv"
         write_adobe_stock_csv(results, adobe_csv)
         write_shutterstock_csv(results, ss_csv)
         if progress_callback:
