@@ -769,12 +769,22 @@ class StockTaggerApp:
                                     key=lambda f: f.stat().st_mtime, reverse=True)
                 ss_csvs = sorted(csv_folder.glob("shutterstock_*.csv"),
                                  key=lambda f: f.stat().st_mtime, reverse=True)
+                from datetime import datetime as _dt
+                _timestamp = _dt.now().strftime("%Y%m%d_%H%M%S")
                 if adobe_csvs:
                     write_adobe_stock_csv(self.last_vector_results, adobe_csvs[0], append=True)
                     progress_cb(f"  [Vector] Adobe CSV追記: {len(self.last_vector_results)}件 → {adobe_csvs[0].name}")
+                else:
+                    new_adobe = csv_folder / f"adobe_stock_{_timestamp}.csv"
+                    write_adobe_stock_csv(self.last_vector_results, new_adobe)
+                    progress_cb(f"  [Vector] Adobe CSV新規作成: {len(self.last_vector_results)}件 → {new_adobe.name}")
                 if ss_csvs:
                     write_shutterstock_csv(self.last_vector_results, ss_csvs[0], append=True)
                     progress_cb(f"  [Vector] SS CSV追記: {len(self.last_vector_results)}件 → {ss_csvs[0].name}")
+                else:
+                    new_ss = csv_folder / f"shutterstock_{_timestamp}.csv"
+                    write_shutterstock_csv(self.last_vector_results, new_ss)
+                    progress_cb(f"  [Vector] SS CSV新規作成: {len(self.last_vector_results)}件 → {new_ss.name}")
                 # Pixta工程4で使い回すためJSONに保存
                 import json as _json
                 vector_meta_path = csv_folder / "vector_metadata.json"

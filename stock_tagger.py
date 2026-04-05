@@ -754,6 +754,8 @@ def embed_pixta_metadata(results: list, progress_callback=None) -> int:
             embed_fn = embed_jpg_iptc
         elif ext == ".png":
             embed_fn = embed_png_xmp
+        elif ext == ".eps":
+            embed_fn = embed_eps_xmp
         else:
             continue
 
@@ -846,10 +848,29 @@ def embed_eps_xmp(eps_path: Path, title: str, keywords: list):
     if binary_header:
         new_ps_length = len(ps_data_new)
         header = bytearray(binary_header)
-        header[4:8] = struct.pack("<I", len(header))
+        ps_start = struct.unpack("<I", header[4:8])[0]
         header[8:12] = struct.pack("<I", new_ps_length)
+
+        # WMF/TIFFプレビューのオフセットをPS長変更分だけ調整して保持
+        old_ps_length = struct.unpack("<I", binary_header[8:12])[0]
+        size_diff = new_ps_length - old_ps_length
+
+        wmf_offset = struct.unpack("<I", header[12:16])[0]
+        wmf_length = struct.unpack("<I", header[16:20])[0]
+        tiff_offset = struct.unpack("<I", header[20:24])[0]
+        tiff_length = struct.unpack("<I", header[24:28])[0]
+
+        # プレビューデータを元ファイルから読み出す
+        wmf_data = raw[wmf_offset:wmf_offset + wmf_length] if wmf_offset and wmf_length else b""
+        tiff_data = raw[tiff_offset:tiff_offset + tiff_length] if tiff_offset and tiff_length else b""
+
+        if wmf_offset and wmf_length:
+            header[12:16] = struct.pack("<I", wmf_offset + size_diff)
+        if tiff_offset and tiff_length:
+            header[20:24] = struct.pack("<I", tiff_offset + size_diff)
+
         with open(eps_path, "wb") as f:
-            f.write(bytes(header) + ps_data_new)
+            f.write(bytes(header) + ps_data_new + wmf_data + tiff_data)
     else:
         with open(eps_path, "wb") as f:
             f.write(ps_data_new)
@@ -1201,7 +1222,8 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     ai_files = get_ai_files(input_path)
 
     all_files = files + photo_files + ai_files
-    if not all_files:
+    vector_subfolders = get_vector_subfolders(input_path)
+    if not all_files and not vector_subfolders:
         raise ValueError("対応する素材ファイルが見つかりませんでした")
 
     total = len(all_files)
@@ -1342,7 +1364,7 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
             if progress_callback:
                 progress_callback(f"  エラー: {file_path.name} - {str(e)}")
 
-    if not results and not photo_results and not ai_results:
+    if not results and not photo_results and not ai_results and not vector_subfolders:
         raise ValueError("処理できたファイルがありません")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1577,7 +1599,7 @@ def prepare_vector_zips_with_xmp(input_folder: str, vector_results: list, progre
         return zips
 
     if progress_callback:
-        progress_callback(f"\n[Vector/Pixta] {len(vector_results)}件のEPS XMP埋込 → ZIP作成...")
+        progress_callback(f"\n[Vector/Pixta] {len(vector_results)}件のZIP作成...")
 
     for meta in vector_results:
         eps_path = Path(meta["eps_path"])
@@ -1588,12 +1610,6 @@ def prepare_vector_zips_with_xmp(input_folder: str, vector_results: list, progre
             continue
 
         try:
-            pixta_title = meta.get("pixta_title_ja", eps_path.stem)[:50]
-            pixta_tags = [k.strip() for k in meta.get("pixta_keywords_ja", "").split(",") if k.strip()][:50]
-            embed_eps_xmp(eps_path, pixta_title, pixta_tags)
-            if progress_callback:
-                progress_callback(f"  EPS XMP埋込完了: {eps_path.name}")
-
             zip_path = create_vector_zip(subfolder, eps_path, png_path)
             if progress_callback:
                 progress_callback(f"  ZIP作成完了: {zip_path.name}")

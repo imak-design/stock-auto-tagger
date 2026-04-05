@@ -279,7 +279,7 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                 if is_ai or ai_filenames:
                     _check_ai_generated_on_list(page, log, ai_filenames=ai_filenames)
 
-                all_cb = page.locator("#all-1")
+                all_cb = page.locator("#item_submit_form #all-1")
                 try:
                     all_cb.wait_for(state="visible", timeout=10000)
                 except PWTimeout:
@@ -473,7 +473,7 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
                 if is_ai:
                     _check_ai_generated_on_list(page, log)
 
-                all_cb = page.locator("#all-1")
+                all_cb = page.locator("#item_submit_form #all-1")
                 try:
                     all_cb.wait_for(state="visible", timeout=10000)
                 except PWTimeout:

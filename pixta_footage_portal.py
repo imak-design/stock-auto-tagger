@@ -312,7 +312,7 @@ def run_footage_upload(
                 log("[テストモード] 審査申請をスキップしました。ブラウザを閉じると次の処理に進みます。")
             else:
                 log("Selecting all items for submission...")
-                all_cb = page.locator("#all-1")
+                all_cb = page.locator("#item_submit_form #all-1")
                 all_cb.wait_for(state="visible", timeout=10000)
                 all_cb.click()
                 time.sleep(1)
