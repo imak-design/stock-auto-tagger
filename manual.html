@@ -541,6 +541,19 @@ playwright install chromium</code></pre>
     <tr><td><code>enabled_sites</code></td><td>アップロードするサイト（不要なサイトを配列から削除）</td></tr>
     <tr><td><code>test_mode</code></td><td><code>true</code> で審査申請をスキップ（GUI からも切替可）</td></tr>
   </table>
+
+  <h3>素材フォルダのサブフォルダ作成</h3>
+  <p><code>input_folder</code> に設定したフォルダの中に、素材の種類に応じてサブフォルダを作成してください。<strong>サブフォルダがない場合、すべて通常のイラストとして処理されます。</strong></p>
+  <table>
+    <tr><th>サブフォルダ</th><th>用途</th><th>必要な人</th></tr>
+    <tr><td><code>AI/</code></td><td>AI生成素材</td><td>Adobe・Pixta で AI生成フラグを自動ONにしたい人</td></tr>
+    <tr><td><code>Photo/</code></td><td>写真素材</td><td>Adobe で写真カテゴリ、Pixta で写真ページにアップしたい人</td></tr>
+    <tr><td><code>Vector/</code></td><td>ベクター素材（EPS + PNG）</td><td>EPS ファイルをアップロードする人</td></tr>
+  </table>
+  <div class="alert-info alert">
+    通常のイラスト素材は <code>input_folder</code> 直下にそのまま入れてください。必要なフォルダだけ作れば OK です。<br>
+    Vector フォルダ内は素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください。
+  </div>
 </section>
 
 <!-- 5. API Key -->
