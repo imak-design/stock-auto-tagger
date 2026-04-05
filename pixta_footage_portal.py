@@ -95,6 +95,7 @@ def run_footage_upload(
     errors = []
     uploaded = 0
     submitted = 0
+    _keep_open = skip_submit
 
     with sync_playwright() as p:
         browser, context = _launch(p)
@@ -246,76 +247,82 @@ def run_footage_upload(
             # Phase 3: 審査申請
             # -------------------------------------------------------
             if skip_submit:
-                log("[テストモード] 審査申請をスキップしました。")
-                context.close()
-                browser.close()
-                return {"uploaded": uploaded, "submitted": 0, "errors": errors}
-
-            log("Selecting all items for submission...")
-            all_cb = page.locator("#all-1")
-            all_cb.wait_for(state="visible", timeout=10000)
-            all_cb.click()
-            time.sleep(1)
-
-            total_items = page.locator("input.submit_items").count()
-            checked_count = page.locator("input.submit_items:checked").count()
-            log(f"Checked items: {checked_count}/{total_items}")
-
-            if checked_count < total_items and total_items > 0:
-                log("[!] Select-all missed some items. Clicking individually...")
-                for item in page.locator("input.submit_items").all():
-                    try:
-                        if not item.is_checked():
-                            item.click(force=True)
-                            time.sleep(0.1)
-                    except Exception:
-                        pass
-                time.sleep(0.5)
-                checked_count = page.locator("input.submit_items:checked").count()
-                log(f"Checked after individual click: {checked_count}/{total_items}")
-
-            if checked_count == 0:
-                log("[!] No items checked after select-all click.")
-                return {"uploaded": uploaded, "submitted": 0, "errors": errors + ["No items checked"]}
-
-            log("Clicking register button...")
-            reg_btn = page.locator("input[value='選択した作品を登録']")
-            reg_btn.wait_for(state="visible", timeout=5000)
-            reg_btn.click()
-            time.sleep(4)
-            log(f"After register URL: {page.url}")
-
-            if "confirm" not in page.url:
-                raise RuntimeError(f"Expected confirm page but got: {page.url}")
-
-            log("Waiting for confirm page to fully load...")
-            page.wait_for_load_state("networkidle", timeout=30000)
-            time.sleep(2)
-
-            log("Clicking submit-for-review button on confirm page...")
-            confirm_btn = page.locator("input[type='submit'][value='審査申請']")
-            confirm_btn.scroll_into_view_if_needed(timeout=5000)
-            confirm_btn.wait_for(state="visible", timeout=30000)
-            confirm_btn.click()
-            log("Clicked 審査申請 button")
-
-            time.sleep(5)
-            log(f"Final URL: {page.url}")
-
-            if "confirm_complete" in page.url or "complete" in page.url or "manager" in page.url:
-                submitted = checked_count
-                log(f"[OK] Upload & submission complete! {uploaded} uploaded, {submitted} submitted.")
+                log("[テストモード] 審査申請をスキップしました。ブラウザを閉じると次の処理に進みます。")
             else:
-                log(f"[?] Unexpected final URL: {page.url}")
-                submitted = checked_count
+                log("Selecting all items for submission...")
+                all_cb = page.locator("#all-1")
+                all_cb.wait_for(state="visible", timeout=10000)
+                all_cb.click()
+                time.sleep(1)
+
+                total_items = page.locator("input.submit_items").count()
+                checked_count = page.locator("input.submit_items:checked").count()
+                log(f"Checked items: {checked_count}/{total_items}")
+
+                if checked_count < total_items and total_items > 0:
+                    log("[!] Select-all missed some items. Clicking individually...")
+                    for item in page.locator("input.submit_items").all():
+                        try:
+                            if not item.is_checked():
+                                item.click(force=True)
+                                time.sleep(0.1)
+                        except Exception:
+                            pass
+                    time.sleep(0.5)
+                    checked_count = page.locator("input.submit_items:checked").count()
+                    log(f"Checked after individual click: {checked_count}/{total_items}")
+
+                if checked_count == 0:
+                    log("[!] No items checked after select-all click.")
+                    return {"uploaded": uploaded, "submitted": 0, "errors": errors + ["No items checked"]}
+
+                log("Clicking register button...")
+                reg_btn = page.locator("input[value='選択した作品を登録']")
+                reg_btn.wait_for(state="visible", timeout=5000)
+                reg_btn.click()
+                time.sleep(4)
+                log(f"After register URL: {page.url}")
+
+                if "confirm" not in page.url:
+                    raise RuntimeError(f"Expected confirm page but got: {page.url}")
+
+                log("Waiting for confirm page to fully load...")
+                page.wait_for_load_state("networkidle", timeout=30000)
+                time.sleep(2)
+
+                log("Clicking submit-for-review button on confirm page...")
+                confirm_btn = page.locator("input[type='submit'][value='審査申請']")
+                confirm_btn.scroll_into_view_if_needed(timeout=5000)
+                confirm_btn.wait_for(state="visible", timeout=30000)
+                confirm_btn.click()
+                log("Clicked 審査申請 button")
+
+                time.sleep(5)
+                log(f"Final URL: {page.url}")
+
+                if "confirm_complete" in page.url or "complete" in page.url or "manager" in page.url:
+                    submitted = checked_count
+                    log(f"[OK] Upload & submission complete! {uploaded} uploaded, {submitted} submitted.")
+                else:
+                    log(f"[?] Unexpected final URL: {page.url}")
+                    submitted = checked_count
 
         except Exception as e:
             log(f"[NG] Error: {e}")
             errors.append(str(e))
             raise
         finally:
-            context.close()
-            browser.close()
+            if not _keep_open:
+                context.close()
+                browser.close()
+            else:
+                log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
+                try:
+                    while browser.is_connected() and context.pages:
+                        time.sleep(3)
+                except Exception:
+                    pass
+                log("ブラウザが閉じられました。")
 
     return {"uploaded": uploaded, "submitted": submitted, "errors": errors}
 

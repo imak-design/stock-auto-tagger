@@ -363,11 +363,9 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                 browser.close()
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
-                # ブラウザに定期的に通信し、閉じられたら例外で抜ける
                 try:
-                    while True:
+                    while browser.is_connected() and context.pages:
                         time.sleep(3)
-                        page.evaluate("1")
                 except Exception:
                     pass
                 log("ブラウザが閉じられました。")

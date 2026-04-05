@@ -299,11 +299,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 browser.close()
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
-                # ブラウザに定期的に通信し、閉じられたら例外で抜ける
                 try:
-                    while True:
+                    while browser.is_connected() and context.pages:
                         time.sleep(3)
-                        page.evaluate("1")
                 except Exception:
                     pass
                 log("ブラウザが閉じられました。")
