@@ -25,6 +25,7 @@ from stock_tagger import (
     upload_to_shutterstock, get_upload_targets,
     process_vector_files, move_vector_subfolders,
     get_vector_eps_files, prepare_vector_zips_with_xmp,
+    estimate_api_requests, validate_upload_files,
 )
 from adobe_portal import run_portal_automation
 
@@ -66,6 +67,8 @@ class StockTaggerApp:
         self._timer_id = None
         self._timer_start = None
         self.last_results = []   # 工程1の結果を保持
+        self.last_photo_results = []  # 写真素材の結果を保持
+        self.last_ai_results = []  # AI素材の結果を保持
         self.last_folder = ""    # 処理したフォルダを保持
         # 有効サイト設定（デフォルト全ON）
         enabled = self.config.get("enabled_sites", ["adobe", "shutterstock", "pixta"])
@@ -246,6 +249,7 @@ class StockTaggerApp:
         folder_frame.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
 
         self.folder_var = tk.StringVar(value=self.config.get("input_folder", ""))
+        self.folder_var.trace_add("write", self._update_estimate)
         folder_entry = ttk.Entry(folder_frame, textvariable=self.folder_var, width=48)
         folder_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -321,7 +325,7 @@ class StockTaggerApp:
         btn_frame1.pack(fill=tk.X, pady=(4, 4))
 
         self.step0_btn = ttk.Button(btn_frame1,
-            text="⚡  【工程0】リネーム → タグ生成",
+            text="⚡  【工程0】リネーム → 全自動",
             style="Step0.TButton",
             command=self._start_step0)
         self.step0_btn.pack(side=tk.LEFT)
@@ -337,6 +341,13 @@ class StockTaggerApp:
             bg="#1a1a2e", fg="#8892b0",
             font=("Helvetica", 9))
         self.status_label.pack(side=tk.LEFT, padx=(16, 0))
+
+        # API概算リクエスト数ラベル
+        self.estimate_label = tk.Label(btn_frame1,
+            text="",
+            bg="#1a1a2e", fg="#6c7086",
+            font=("Helvetica", 8))
+        self.estimate_label.pack(side=tk.RIGHT)
 
         # --- 実行ボタン (2行目) ---
         btn_frame2 = ttk.Frame(main, style="TFrame")
@@ -442,6 +453,53 @@ class StockTaggerApp:
             env_path = ENV_DIR / ".env"
             self._log(f"✗ APIキーが見つかりません。{env_path} にGEMINI_API_KEYを設定してください。", "error")
         self._log("準備完了。フォルダを確認して実行ボタンを押してください。", "info")
+        self._update_estimate()
+
+    def _update_estimate(self, *args):
+        """素材フォルダの内容からAPI概算リクエスト数を表示"""
+        folder = self.folder_var.get().strip()
+        if not folder or not Path(folder).exists():
+            self.estimate_label.config(text="")
+            return
+        try:
+            est = estimate_api_requests(folder)
+            if est["total_requests"] > 0:
+                self.estimate_label.config(
+                    text=f"概算 {est['total_requests']} リクエスト")
+            else:
+                self.estimate_label.config(text="")
+        except Exception:
+            self.estimate_label.config(text="")
+
+    def _get_saved_video_metadata(self, folder: str) -> dict:
+        """工程1の動画メタデータを取得する（メモリ → JSONファイルの順で検索）。
+        戻り値: {filename: metadata_dict}"""
+        # まずメモリから
+        all_saved = self.last_results + self.last_photo_results + self.last_ai_results
+        result = {r["filename"]: r for r in all_saved if r.get("file_type") == "video"}
+        if result:
+            return result
+        # JSONファイルから
+        json_path = Path(folder) / "csv_output" / "video_metadata.json"
+        if json_path.exists():
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    video_list = json.load(f)
+                return {r["filename"]: r for r in video_list}
+            except Exception:
+                pass
+        return {}
+
+    def _check_upload_limits(self, folder: str) -> bool:
+        """アップロード制限チェック。問題があれば警告を出してユーザーに確認する。
+        戻り値: 続行してよければTrue"""
+        warnings = validate_upload_files(folder)
+        if not warnings:
+            return True
+        msg = "以下のファイルがアップロード制限を超えています:\n\n"
+        msg += "\n".join(f"• {w}" for w in warnings)
+        msg += "\n\nこのまま続行しますか？\n（該当サイトでアップロードエラーになる可能性があります）"
+        return messagebox.askyesno("アップロード制限の警告", msg)
 
     def _browse_folder(self):
         folder = filedialog.askdirectory(title="素材フォルダを選択")
@@ -517,6 +575,8 @@ class StockTaggerApp:
         if not folder or not variation_folder:
             messagebox.showerror("エラー", "素材フォルダとバリエーションフォルダを指定してください。")
             return
+        if not self._check_upload_limits(folder):
+            return
 
         self._save_settings()
         self.is_running = True
@@ -545,7 +605,7 @@ class StockTaggerApp:
                     self._log("バリエーションフォルダに素材がありませんでした。素材フォルダの既存ファイルで続行します。", "info")
                 self._log("タグ生成を開始します...", "info")
                 self.is_running = False
-                self._start_processing(pipeline_mode=True)
+                self._start_processing()
 
             self.root.after(0, on_rename_done)
 
@@ -568,11 +628,13 @@ class StockTaggerApp:
             self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state="disabled")
+        # テストモードのブラウザ待機通知
+        if "ブラウザを開いたままにします" in message:
+            self._show_topmost_popup("テストモード", "ブラウザを閉じると次の処理に進みます。")
 
-    def _start_processing(self, pipeline_mode: bool = False):
+    def _start_processing(self):
         if self.is_running:
             return
-
         api_key = self.api_key_var.get().strip()
         folder = self.folder_var.get().strip()
 
@@ -582,11 +644,10 @@ class StockTaggerApp:
         if not folder:
             messagebox.showerror("エラー", "素材フォルダを指定してください。")
             return
+        if not self._check_upload_limits(folder):
+            return
 
-        if pipeline_mode:
-            self._ensure_sessions_then_start(folder, api_key)
-        else:
-            self._do_start_processing(folder, api_key, pipeline_mode)
+        self._ensure_sessions_then_start(folder, api_key)
 
     def _login_then_run(self, name: str, mod_name: str, continuation):
         """セッションがない場合にログインを促し、完了後にcontinuationを実行する。"""
@@ -652,13 +713,13 @@ class StockTaggerApp:
                     mod._confirm_callback = None
 
                     self.root.after(0, lambda n=name: self._log(f"[OK] {n} ログイン完了", "info"))
-                self.root.after(0, lambda: self._do_start_processing(folder, api_key, pipeline_mode=True, already_started=True))
+                self.root.after(0, lambda: self._do_start_processing(folder, api_key, already_started=True))
 
             threading.Thread(target=run_logins, daemon=True).start()
         else:
-            self._do_start_processing(folder, api_key, pipeline_mode=True)
+            self._do_start_processing(folder, api_key)
 
-    def _do_start_processing(self, folder: str, api_key: str, pipeline_mode: bool = False, already_started: bool = False):
+    def _do_start_processing(self, folder: str, api_key: str, already_started: bool = False):
         if not already_started:
             self._save_settings()
             self.is_running = True
@@ -671,14 +732,14 @@ class StockTaggerApp:
 
         thread = threading.Thread(
             target=self._run_processing,
-            args=(folder, api_key, pipeline_mode),
+            args=(folder, api_key),
             daemon=True
         )
         thread.start()
 
-    def _run_processing(self, folder: str, api_key: str, pipeline_mode: bool = False):
+    def _run_processing(self, folder: str, api_key: str):
         if self.test_mode:
-            self.root.after(0, lambda: self._log("⚠ テストモードで実行中（審査申請はスキップされます）", "error"))
+            self.root.after(0, lambda: self._log("⚠ テストモードで実行中（審査申請はスキップされます）\n   v3: AI/写真フォルダ対応 / 3パス処理 / テストモード移動スキップ", "error"))
         try:
             total_files = [0]
 
@@ -713,6 +774,8 @@ class StockTaggerApp:
                         self._log(f"  • {e['filename']}: {e['error']}", "error")
                 # 結果を保存して工程2ボタンを有効化
                 self.last_results = result.get("results", [])
+                self.last_photo_results = result.get("photo_results", [])
+                self.last_ai_results = result.get("ai_results", [])
                 self.last_folder = folder
                 if self.last_results:
                     self._enable_btn(self.move_btn, bg="#e94560")
@@ -725,24 +788,13 @@ class StockTaggerApp:
                     for ve in vr["errors"]:
                         self._log(f"  [Vector] エラー: {ve['filename']} - {ve['error']}", "error")
 
-                if pipeline_mode:
-                    # フルパイプライン: Adobe → Shutterstock → Pixta → 完了メッセージ
-                    self._log("\nアップロードパイプラインを開始します...", "info")
-                    threading.Thread(
-                        target=self._run_pipeline_uploads,
-                        args=(folder, api_key),
-                        daemon=True
-                    ).start()
-                else:
-                    self._log("\n各サイトにアップロード後、【工程2】ボタンを押してファイルを移動してください。", "info")
-                    self.is_running = False
-                    self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
-                    self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
-                    msg = f"成功: {result['success']}件 / エラー: {result['error']}件"
-                    if result["errors"]:
-                        self._show_topmost_popup("工程1 完了（エラーあり）", msg, error=True)
-                    else:
-                        self._show_topmost_popup("工程1 完了", msg)
+                # タグ生成完了 → アップロードパイプラインへ
+                self._log("\nアップロードパイプラインを開始します...", "info")
+                threading.Thread(
+                    target=self._run_pipeline_uploads,
+                    args=(folder, api_key),
+                    daemon=True
+                ).start()
 
             self.root.after(0, on_complete)
 
@@ -785,6 +837,7 @@ class StockTaggerApp:
                                    key=lambda f: f.stat().st_mtime, reverse=True)
         adobe_targets = get_upload_targets(folder_path, "adobe")
         vector_eps_files = get_vector_eps_files(folder_path)
+
         ai_files = get_ai_files(folder_path)
 
         if "adobe" not in enabled_sites:
@@ -801,6 +854,7 @@ class StockTaggerApp:
                 try:
                     log("\n" + "─" * 40)
                     log(f"☁ Adobe Stock ブラウザアップロード開始... ({len(adobe_targets)}件)")
+
                     portal_result = run_portal_automation(
                         csv_path=adobe_csvs[0],
                         progress_callback=log,
@@ -906,18 +960,26 @@ class StockTaggerApp:
             try:
                 log("\n" + "─" * 40)
                 log(f"🎬 Pixta 動画アップロード開始: {len(video_targets)}件...")
+
+                # 工程1の結果から動画メタデータを取得（API再呼び出し不要）
+                saved_video_meta = self._get_saved_video_metadata(folder)
+
                 video_metadata = []
                 for vf in video_targets:
-                    log(f"  Geminiで動画解析中: {vf.name}...")
-                    stem = vf.stem
-                    filename_hint = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
-                    meta = analyze_video(vf, api_key, log, filename_hint=filename_hint)
-                    title = meta.get("pixta_title_ja", filename_hint)
-                    video_metadata.append({
-                        "title": title,
-                        "tags": [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50],
-                    })
-                    log(f"  解析完了: タイトル={title[:40]} / タグ{len(video_metadata[-1]['tags'])}件")
+                    meta = saved_video_meta.get(vf.name)
+                    if meta:
+                        title = meta.get("pixta_title_ja", vf.stem)
+                        tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
+                        log(f"  工程1の結果を使用: {vf.name} → {title[:40]}")
+                    else:
+                        log(f"  Geminiで動画解析中: {vf.name}...")
+                        stem = vf.stem
+                        filename_hint = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
+                        meta = analyze_video(vf, api_key, log, filename_hint=filename_hint)
+                        title = meta.get("pixta_title_ja", filename_hint)
+                        tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
+                        log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
+                    video_metadata.append({"title": title, "tags": tags})
                 footage_result = run_footage_upload(
                     files=video_targets,
                     metadata=video_metadata,
@@ -948,6 +1010,7 @@ class StockTaggerApp:
 
         # ---- AI素材の2パス処理（Adobe + Pixta のみ） ----
         # ※ テストモード時にAdobe全選択でファイル形式変更が写真に影響しないよう、写真より先に処理
+        ai_files = get_ai_files(folder_path)
         ai_adobe_csvs = sorted(csv_folder.glob("ai_adobe_stock_*.csv"),
                                key=lambda f: f.stat().st_mtime, reverse=True)
 
@@ -1076,7 +1139,7 @@ class StockTaggerApp:
         else:
             log("📦 ファイルを移動中...")
             try:
-                move_results = list(self.last_results)
+                move_results = list(self.last_results) + list(self.last_photo_results) + list(self.last_ai_results)
                 for vf in video_targets:
                     move_results.append({"original_path": str(vf)})
                 move_result = move_processed_files(move_results, self.last_folder, log)
@@ -1107,10 +1170,11 @@ class StockTaggerApp:
             self.is_running = False
             self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
             self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
+            _time_str = f"{_minutes}分{_seconds}秒" if _minutes > 0 else f"{_seconds}秒"
             if self.test_mode:
-                self._show_topmost_popup("全工程完了", "アップロード完了しました（テストモード：ファイル移動はスキップ）。")
+                self._show_topmost_popup("全工程完了", f"アップロード完了しました（テストモード：ファイル移動はスキップ）。\n処理時間: {_time_str}")
             else:
-                self._show_topmost_popup("全工程完了", "アップロード＆ファイル移動まで全て完了しました。")
+                self._show_topmost_popup("全工程完了", f"アップロード＆ファイル移動まで全て完了しました。\n処理時間: {_time_str}")
 
         self.root.after(0, on_pipeline_done)
 
@@ -1125,6 +1189,8 @@ class StockTaggerApp:
         folder = self.folder_var.get().strip()
         if not folder:
             messagebox.showerror("エラー", "素材フォルダを指定してください。")
+            return
+        if not self._check_upload_limits(folder):
             return
 
         if not SESSION_FILE.exists():
@@ -1178,6 +1244,8 @@ class StockTaggerApp:
         )
 
         def run():
+            import time as _time
+            _step_start = _time.time()
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
 
             try:
@@ -1238,10 +1306,13 @@ class StockTaggerApp:
                         )
                         log(f"[OK] Adobe 写真 提出完了: {photo_result['submitted']}件")
 
-                def on_adobe_done():
+                _el = int(_time.time() - _step_start)
+                _m, _s = divmod(_el, 60)
+                _t = f"{_m}分{_s}秒" if _m > 0 else f"{_s}秒"
+                def on_adobe_done(_t=_t):
                     self._log("\n✓ 工程2 Adobe 完了！", "success")
                     self._enable_btn(self.adobe_btn, bg="#1a6fa8")
-                    self._show_topmost_popup("工程2 完了", "Adobe Stock アップロード完了！")
+                    self._show_topmost_popup("工程2 完了", f"Adobe Stock アップロード完了！\n処理時間: {_t}")
                 self.root.after(0, on_adobe_done)
             except Exception as e:
                 def on_adobe_err(err=str(e)):
@@ -1263,6 +1334,8 @@ class StockTaggerApp:
         folder = self.folder_var.get().strip()
         if not folder:
             messagebox.showerror("エラー", "素材フォルダを指定してください。")
+            return
+        if not self._check_upload_limits(folder):
             return
 
         if not SS_SESSION.exists():
@@ -1298,8 +1371,8 @@ class StockTaggerApp:
             key=lambda f: f.stat().st_mtime, reverse=True
         )
 
-        # --- 開始前確認ダイアログ ---
         all_targets = ss_targets + photo_files
+        # --- 開始前確認ダイアログ ---
         file_list = "\n".join(f"  {f.name}" for f in all_targets[:10])
         if len(all_targets) > 10:
             file_list += f"\n  ...他{len(all_targets) - 10}件"
@@ -1319,6 +1392,8 @@ class StockTaggerApp:
         self._log(f"\n☁ Shutterstock ブラウザアップロード開始... ({len(all_targets)}件)", "info")
 
         def run():
+            import time as _time
+            _step_start = _time.time()
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
             try:
                 # 通常ファイル
@@ -1364,10 +1439,14 @@ class StockTaggerApp:
                         )
                         log(f"[OK] Shutterstock 写真 提出完了: {photo_ss['submitted']}件")
 
-                def on_done():
+
+                _el = int(_time.time() - _step_start)
+                _m, _s = divmod(_el, 60)
+                _t = f"{_m}分{_s}秒" if _m > 0 else f"{_s}秒"
+                def on_done(_t=_t):
                     self._log("\n✓ 工程3 Shutterstock 完了！", "success")
                     self._enable_btn(self.ss_btn, bg="#cc5500")
-                    self._show_topmost_popup("工程3 完了", "Shutterstock アップロード完了！")
+                    self._show_topmost_popup("工程3 完了", f"Shutterstock アップロード完了！\n処理時間: {_t}")
                 self.root.after(0, on_done)
 
             except Exception as e:
@@ -1387,11 +1466,13 @@ class StockTaggerApp:
         from pixta_portal import run_upload_and_submit as pixta_upload, SESSION_FILE as PIXTA_SESSION
         from pixta_footage_portal import run_footage_upload
         from pathlib import Path as _Path
-        from stock_tagger import get_upload_targets, get_ai_files as _get_ai_files, get_photo_files as _get_photo_files, analyze_video, UPLOAD_VIDEO_EXTENSIONS
+        from stock_tagger import get_upload_targets, get_ai_files as _get_ai_files, analyze_video, UPLOAD_VIDEO_EXTENSIONS
 
         folder = self.folder_var.get().strip()
         if not folder:
             messagebox.showerror("エラー", "素材フォルダを指定してください。")
+            return
+        if not self._check_upload_limits(folder):
             return
 
         if not PIXTA_SESSION.exists():
@@ -1402,6 +1483,7 @@ class StockTaggerApp:
         folder_path = _Path(folder)
         all_targets = get_upload_targets(folder_path, "pixta")
         ai_files = _get_ai_files(folder_path)
+        from stock_tagger import get_photo_files as _get_photo_files
         photo_files = _get_photo_files(folder_path)
         image_targets = [f for f in all_targets if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
         video_targets = [f for f in all_targets if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
@@ -1440,6 +1522,8 @@ class StockTaggerApp:
         )
 
         def run():
+            import time as _time
+            _step_start = _time.time()
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
             try:
                 if image_targets:
@@ -1449,18 +1533,26 @@ class StockTaggerApp:
 
                 if video_targets:
                     log(f"\n🎬 動画アップロード: {len(video_targets)}件...")
+
+                    # 工程1の結果から動画メタデータを取得（API再呼び出し不要）
+                    saved_video_meta = self._get_saved_video_metadata(folder)
+
                     video_metadata = []
                     for vf in video_targets:
-                        log(f"  Gemini解析中: {vf.name}...")
-                        stem = vf.stem
-                        filename_hint = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
-                        meta = analyze_video(vf, api_key, log, filename_hint=filename_hint)
-                        title = meta.get("pixta_title_ja", filename_hint)
-                        video_metadata.append({
-                            "title": title,
-                            "tags": [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50],
-                        })
-                        log(f"  解析完了: タイトル={title[:40]} / タグ{len(video_metadata[-1]['tags'])}件")
+                        meta = saved_video_meta.get(vf.name)
+                        if meta:
+                            title = meta.get("pixta_title_ja", vf.stem)
+                            tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
+                            log(f"  工程1の結果を使用: {vf.name} → {title[:40]}")
+                        else:
+                            log(f"  Gemini解析中: {vf.name}...")
+                            stem = vf.stem
+                            filename_hint = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
+                            meta = analyze_video(vf, api_key, log, filename_hint=filename_hint)
+                            title = meta.get("pixta_title_ja", filename_hint)
+                            tags = [t.strip() for t in meta.get("pixta_keywords_ja", "").split(",") if t.strip()][:50]
+                            log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
+                        video_metadata.append({"title": title, "tags": tags})
                     vid_result = run_footage_upload(files=video_targets, metadata=video_metadata, progress_callback=log, skip_submit=self.test_mode)
                     log(f"[OK] 動画完了: アップロード{vid_result['uploaded']}件 / 審査申請{vid_result['submitted']}件")
 
@@ -1490,10 +1582,13 @@ class StockTaggerApp:
                         ai_result = pixta_upload(files=ai_img, progress_callback=log, skip_submit=self.test_mode, is_ai=True)
                         log(f"[OK] Pixta AI素材 完了: アップロード{ai_result['uploaded']}件 / 審査申請{ai_result['submitted']}件")
 
-                def on_pixta_done():
+                _el = int(_time.time() - _step_start)
+                _m, _s = divmod(_el, 60)
+                _t = f"{_m}分{_s}秒" if _m > 0 else f"{_s}秒"
+                def on_pixta_done(_t=_t):
                     self._log("\n✓ 工程4 Pixta 完了！", "success")
                     self._enable_btn(self.pixta_btn, bg="#b5338a")
-                    self._show_topmost_popup("工程4 完了", "Pixta アップロード完了！")
+                    self._show_topmost_popup("工程4 完了", f"Pixta アップロード完了！\n処理時間: {_t}")
                 self.root.after(0, on_pixta_done)
             except Exception as e:
                 def on_pixta_err(err=str(e)):
@@ -1518,8 +1613,8 @@ class StockTaggerApp:
         from stock_tagger import get_upload_targets, UPLOAD_VIDEO_EXTENSIONS, move_processed_files as _move
 
         # last_resultsがあればそれを使い、なければフォルダ内の全対象ファイルをリストアップ
-        if self.last_results:
-            move_results = list(self.last_results)
+        if self.last_results or self.last_photo_results or self.last_ai_results:
+            move_results = list(self.last_results) + list(self.last_photo_results) + list(self.last_ai_results)
         else:
             all_files = list(_Path(folder).iterdir())
             move_results = [{"original_path": str(f)} for f in all_files if f.is_file() and f.suffix.lower() not in {".csv", ".json", ".txt"}]
@@ -1551,6 +1646,8 @@ class StockTaggerApp:
                     if vec_move["errors"]:
                         self._log(f"  Vectorフォルダ移動失敗: {', '.join(vec_move['errors'])}", "error")
                     self.last_results = []
+                    self.last_photo_results = []
+                    self.last_ai_results = []
                     self.last_folder = ""
                     self._enable_btn(self.move_btn, bg="#0f3460")
                 self.root.after(0, on_done)

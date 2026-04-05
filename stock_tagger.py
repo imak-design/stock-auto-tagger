@@ -134,13 +134,13 @@ def call_gemini_api(api_key: str, payload: dict, model: str = None) -> str:
             raise
 
 
-def upload_file_to_gemini(file_path: Path, api_key: str, progress_callback=None) -> str:
-    """File APIで動画をアップロードしてfileUriを返す"""
+def upload_file_to_gemini(file_path: Path, api_key: str, progress_callback=None, wait_active=True) -> str:
+    """File APIでファイルをアップロードしてfileUriを返す（画像・動画両対応）"""
     import urllib.request
     import urllib.error
 
     if progress_callback:
-        progress_callback(f"  動画をアップロード中: {file_path.name}")
+        progress_callback(f"  アップロード中: {file_path.name}")
 
     mime_type, _ = mimetypes.guess_type(str(file_path))
     if not mime_type:
@@ -181,26 +181,28 @@ def upload_file_to_gemini(file_path: Path, api_key: str, progress_callback=None)
     file_uri = file_info["file"]["uri"]
     file_name = file_info["file"]["name"]
 
-    max_wait = 120
-    waited = 0
-    while True:
-        time.sleep(3)
-        waited += 3
-        if progress_callback:
-            progress_callback(f"  動画処理中... ({waited}秒)")
+    if wait_active:
+        # 動画はACTIVEになるまで待機が必要
+        max_wait = 120
+        waited = 0
+        while True:
+            time.sleep(3)
+            waited += 3
+            if progress_callback:
+                progress_callback(f"  動画処理中... ({waited}秒)")
 
-        status_url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
-        status_req = urllib.request.Request(status_url)
-        with urllib.request.urlopen(status_req) as res:
-            status_info = json.loads(res.read().decode("utf-8"))
+            status_url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
+            status_req = urllib.request.Request(status_url)
+            with urllib.request.urlopen(status_req) as res:
+                status_info = json.loads(res.read().decode("utf-8"))
 
-        state = status_info.get("state", "")
-        if state == "ACTIVE":
-            break
-        elif state == "FAILED":
-            raise ValueError("動画のアップロードに失敗しました")
-        if waited >= max_wait:
-            raise TimeoutError("動画処理がタイムアウトしました")
+            state = status_info.get("state", "")
+            if state == "ACTIVE":
+                break
+            elif state == "FAILED":
+                raise ValueError("ファイルのアップロードに失敗しました")
+            if waited >= max_wait:
+                raise TimeoutError("ファイル処理がタイムアウトしました")
 
     return file_uri, file_name, mime_type
 
@@ -237,8 +239,8 @@ def detect_png_background(file_path: Path) -> dict:
 
 
 def build_background_prompt(bg_info: dict) -> str:
-    """背景情報をプロンプト追記用テキストに変換"""
-    if not bg_info["has_transparent"] and not bg_info["has_black"]:
+    """背景情報をプロンプト追記用テキストに変換（透過がある場合のみ追記）"""
+    if not bg_info["has_transparent"]:
         return ""
     lines = ["\n##【この画像の背景情報（必ず反映すること）】"]
     if bg_info["has_transparent"] and bg_info["has_black"]:
@@ -249,21 +251,13 @@ def build_background_prompt(bg_info: dict) -> str:
             "- adobe_keywords_en に 'transparent background', 'black background' を追加",
             "- pixta_keywords_ja に「透明背景」「黒背景」「切り抜き」を追加",
         ]
-    elif bg_info["has_transparent"]:
+    else:
         lines += [
             "- この画像は透明背景（アルファチャンネルあり）の素材です",
             "- adobe_title_en に 'transparent background' を含めること",
             "- pixta_title_ja に「透明背景」を含めること",
             "- adobe_keywords_en に 'transparent background' を追加",
             "- pixta_keywords_ja に「透明背景」「切り抜き」を追加",
-        ]
-    elif bg_info["has_black"]:
-        lines += [
-            "- この画像は黒背景の素材です",
-            "- adobe_title_en に 'black background' を含めること",
-            "- pixta_title_ja に「黒背景」を含めること",
-            "- adobe_keywords_en に 'black background' を追加",
-            "- pixta_keywords_ja に「黒背景」を追加",
         ]
     return "\n".join(lines)
 
@@ -295,6 +289,173 @@ def analyze_image(file_path: Path, api_key: str) -> dict:
 
     text = call_gemini_api(api_key, payload)
     return parse_json_response(text)
+
+
+BATCH_MAX = 10  # バッチ処理の最大枚数
+
+
+def estimate_api_requests(input_folder: str) -> dict:
+    """素材フォルダ内のファイル数からAPIリクエスト数を概算する"""
+    import math
+    input_path = Path(input_folder)
+    if not input_path.exists():
+        return {"images": 0, "videos": 0, "vectors": 0,
+                "image_requests": 0, "video_requests": 0, "vector_requests": 0,
+                "total_requests": 0}
+
+    # 通常 + 写真 + AI画像/動画を集計
+    image_count = 0
+    video_count = 0
+    scan_dirs = [input_path]
+    ai_folder = input_path / "AI"
+    photo_folder = input_path / "Photo"
+    if ai_folder.exists():
+        scan_dirs.append(ai_folder)
+    if photo_folder.exists():
+        scan_dirs.append(photo_folder)
+
+    for d in scan_dirs:
+        for f in d.iterdir():
+            if not f.is_file():
+                continue
+            ext = f.suffix.lower()
+            if ext in VIDEO_EXTENSIONS:
+                video_count += 1
+            elif ext in IMAGE_EXTENSIONS:
+                image_count += 1
+
+    # ベクター（Vectorサブフォルダ数 = PNG数）
+    vector_count = 0
+    vector_path = input_path / "Vector"
+    if vector_path.exists():
+        vector_count = sum(1 for d in vector_path.iterdir()
+                          if d.is_dir() and list(d.glob("*.png")))
+
+    image_requests = math.ceil(image_count / BATCH_MAX) if image_count else 0
+    vector_requests = math.ceil(vector_count / BATCH_MAX) if vector_count else 0
+    video_requests = video_count  # 動画は工程1で解析、Pixta工程4は結果を使い回し
+
+    return {
+        "images": image_count,
+        "videos": video_count,
+        "vectors": vector_count,
+        "image_requests": image_requests,
+        "video_requests": video_requests,
+        "vector_requests": vector_requests,
+        "total_requests": image_requests + video_requests + vector_requests,
+    }
+
+
+# ファイルサイズ上限（MB）
+ADOBE_MAX_IMAGE_MB = 45
+PIXTA_MAX_PNG_MB = 30
+PIXTA_MAX_UPLOAD_COUNT = 50
+SHUTTERSTOCK_MAX_IMAGE_MB = 50
+
+
+def validate_upload_files(input_folder: str) -> list:
+    """素材フォルダ内のファイルがアップロード制限に違反していないかチェックする。
+    戻り値: 警告メッセージのリスト（空なら問題なし）"""
+    input_path = Path(input_folder)
+    if not input_path.exists():
+        return []
+
+    warnings = []
+
+    # スキャン対象ディレクトリ
+    scan_dirs = [input_path]
+    ai_folder = input_path / "AI"
+    photo_folder = input_path / "Photo"
+    if ai_folder.exists():
+        scan_dirs.append(ai_folder)
+    if photo_folder.exists():
+        scan_dirs.append(photo_folder)
+
+    image_count = 0
+    for d in scan_dirs:
+        for f in d.iterdir():
+            if not f.is_file():
+                continue
+            ext = f.suffix.lower()
+            if ext not in IMAGE_EXTENSIONS:
+                continue
+            image_count += 1
+            size_mb = f.stat().st_size / (1024 * 1024)
+
+            if size_mb > ADOBE_MAX_IMAGE_MB:
+                warnings.append(f"[Adobe] {f.name} ({size_mb:.1f}MB) → 上限{ADOBE_MAX_IMAGE_MB}MBを超過")
+            if ext == ".png" and size_mb > PIXTA_MAX_PNG_MB:
+                warnings.append(f"[Pixta] {f.name} ({size_mb:.1f}MB) → PNG上限{PIXTA_MAX_PNG_MB}MBを超過")
+            if size_mb > SHUTTERSTOCK_MAX_IMAGE_MB:
+                warnings.append(f"[Shutterstock] {f.name} ({size_mb:.1f}MB) → 上限{SHUTTERSTOCK_MAX_IMAGE_MB}MBを超過")
+
+    if image_count > PIXTA_MAX_UPLOAD_COUNT:
+        warnings.append(f"[Pixta] 画像{image_count}枚 → 一度にアップロードできるのは{PIXTA_MAX_UPLOAD_COUNT}枚まで")
+
+    return warnings
+
+
+def _build_batch_prompt(base_prompt: str, filenames: list, bg_prompt: str = "") -> str:
+    """バッチ用プロンプトを構築（ファイル名順でJSON配列を返す指示を追加）"""
+    file_list = "\n".join(f"  {i+1}. {name}" for i, name in enumerate(filenames))
+    batch_instruction = (
+        f"\n\n##【バッチ処理指示】\n"
+        f"以下の{len(filenames)}枚の画像が順番に添付されています。\n"
+        f"{file_list}\n\n"
+        f"各画像に対して個別にメタデータを生成し、上記の順番通りにJSONオブジェクトの配列で返してください。\n"
+        f"必ず {len(filenames)} 個のJSONオブジェクトを含む配列を返すこと。"
+    )
+    return base_prompt + bg_prompt + batch_instruction
+
+
+def analyze_images_batch(file_paths: list, api_key: str, bg_prompt: str = "",
+                         progress_callback=None) -> list:
+    """複数画像をFile APIでアップロードし、1リクエストでバッチ解析する"""
+    uploaded_files = []
+    filenames = [f.name for f in file_paths]
+
+    try:
+        # 1. 全画像をFile APIでアップロード
+        for file_path in file_paths:
+            if progress_callback:
+                progress_callback(f"  アップロード中: {file_path.name}")
+            file_uri, file_name, mime_type = upload_file_to_gemini(
+                file_path, api_key, wait_active=False
+            )
+            uploaded_files.append((file_uri, file_name, mime_type))
+
+        # 2. バッチ用プロンプト構築
+        prompt = _build_batch_prompt(IMAGE_PROMPT, filenames, bg_prompt)
+
+        # 3. 全file_uriをまとめて1リクエスト
+        parts = [{"text": prompt}]
+        for file_uri, _, mime_type in uploaded_files:
+            parts.append({"file_data": {"mime_type": mime_type, "file_uri": file_uri}})
+
+        payload = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {"responseMimeType": "application/json"}
+        }
+
+        if progress_callback:
+            progress_callback(f"  Gemini解析中（{len(file_paths)}枚バッチ）...")
+
+        text = call_gemini_api(api_key, payload)
+
+        # 4. レスポンスをパース（配列を期待）
+        parsed = parse_json_response(text)
+        if isinstance(parsed, dict):
+            # 1枚だけの場合は辞書で返ることがある
+            parsed = [parsed]
+        if not isinstance(parsed, list):
+            raise ValueError(f"バッチレスポンスが配列ではありません: {type(parsed)}")
+
+        return parsed
+
+    finally:
+        # 5. アップロードファイルを一括削除
+        for _, file_name, _ in uploaded_files:
+            delete_gemini_file(file_name, api_key)
 
 
 def analyze_video(file_path: Path, api_key: str, progress_callback=None, filename_hint: str = "") -> dict:
@@ -722,8 +883,9 @@ UPLOAD_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi"}
 
 
 def detect_transparent_png_in_folder(folder: Path) -> bool:
+    """フォルダ内に透過PNGが1枚でもあるかチェック"""
     for f in folder.iterdir():
-        if f.suffix.lower() == ".png":
+        if f.is_file() and f.suffix.lower() == ".png":
             bg = detect_png_background(f)
             if bg["has_transparent"]:
                 return True
@@ -1042,6 +1204,9 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     from send2trash import send2trash as _send2trash
     for old_csv in csv_folder.glob("*.csv"):
         _send2trash(str(old_csv))
+    old_video_meta = csv_folder / "video_metadata.json"
+    if old_video_meta.exists():
+        _send2trash(str(old_video_meta))
 
     base_dir = input_path.parent
     dest_folder = get_destination_folder(base_dir)
@@ -1049,26 +1214,108 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     ai_folder_path = get_ai_folder(input_path)
     photo_folder_path = get_photo_folder(input_path)
 
-    for i, file_path in enumerate(all_files, 1):
+    # ── 画像を背景タイプ別にグループ分け、動画は別リスト ──
+    video_files = []  # (file_path, is_ai, is_photo)
+    img_no_transparent = []  # 透過なし（JPEG + PNG透過なし）
+    img_transparent = []  # 透過あり・黒背景なし
+    img_transparent_black = []  # 透過あり・黒背景あり
+
+    for file_path in all_files:
         ext = file_path.suffix.lower()
-        file_type = "video" if ext in VIDEO_EXTENSIONS else "image"
         is_ai = file_path.parent == ai_folder_path
         is_photo = file_path.parent == photo_folder_path
+        file_info = (file_path, is_ai, is_photo)
 
+        if ext in VIDEO_EXTENSIONS:
+            video_files.append(file_info)
+        elif ext == ".png":
+            bg_info = detect_png_background(file_path)
+            if bg_info["has_transparent"] and bg_info["has_black"]:
+                img_transparent_black.append(file_info)
+            elif bg_info["has_transparent"]:
+                img_transparent.append(file_info)
+            else:
+                img_no_transparent.append(file_info)
+        else:
+            img_no_transparent.append(file_info)
+
+    # ── バッチグループ定義 ──
+    batch_groups = [
+        (img_no_transparent, ""),
+        (img_transparent, build_background_prompt({"has_transparent": True, "has_black": False})),
+        (img_transparent_black, build_background_prompt({"has_transparent": True, "has_black": True})),
+    ]
+
+    processed_count = 0
+
+    # ── 画像バッチ処理 ──
+    for group_files, bg_prompt in batch_groups:
+        if not group_files:
+            continue
+        # BATCH_MAX枚ずつに分割
+        for batch_start in range(0, len(group_files), BATCH_MAX):
+            batch = group_files[batch_start:batch_start + BATCH_MAX]
+            batch_paths = [info[0] for info in batch]
+
+            if progress_callback:
+                names = ", ".join(p.name for p in batch_paths)
+                progress_callback(f"[{processed_count + 1}〜{processed_count + len(batch)}/{total}] バッチ解析中: {names}")
+            if status_callback:
+                status_callback(processed_count + 1, total, f"バッチ {len(batch)}枚")
+
+            try:
+                batch_results = analyze_images_batch(
+                    batch_paths, api_key, bg_prompt, progress_callback
+                )
+
+                # レスポンス数が足りない場合はエラー扱い
+                if len(batch_results) < len(batch):
+                    for j in range(len(batch_results), len(batch)):
+                        fp, is_ai, is_photo = batch[j]
+                        errors.append({"filename": fp.name, "error": "バッチレスポンスに結果なし"})
+
+                for j, metadata in enumerate(batch_results):
+                    if j >= len(batch):
+                        break
+                    fp, is_ai, is_photo = batch[j]
+                    metadata["filename"] = fp.name
+                    metadata["file_type"] = "image"
+                    metadata["original_path"] = str(fp)
+                    metadata["is_ai"] = is_ai
+                    metadata["is_photo"] = is_photo
+
+                    if is_ai:
+                        ai_results.append(metadata)
+                    elif is_photo:
+                        photo_results.append(metadata)
+                    else:
+                        results.append(metadata)
+
+                    if progress_callback:
+                        progress_callback(f"  完了: {fp.name} → {metadata.get('adobe_title_en', '')[:50]}")
+
+            except Exception as e:
+                # バッチ全体が失敗した場合、全ファイルをエラーに
+                for fp, _, _ in batch:
+                    errors.append({"filename": fp.name, "error": str(e)})
+                if progress_callback:
+                    progress_callback(f"  バッチエラー: {str(e)}")
+
+            processed_count += len(batch)
+
+    # ── 動画は個別処理 ──
+    for file_path, is_ai, is_photo in video_files:
+        processed_count += 1
         if status_callback:
-            status_callback(i, total, file_path.name)
+            status_callback(processed_count, total, file_path.name)
         if progress_callback:
             prefix = "[AI] " if is_ai else "[写真] " if is_photo else ""
-            progress_callback(f"[{i}/{total}] {prefix}解析中: {file_path.name}")
+            progress_callback(f"[{processed_count}/{total}] {prefix}解析中: {file_path.name}")
 
         try:
-            if file_type == "video":
-                metadata = analyze_video(file_path, api_key, progress_callback)
-            else:
-                metadata = analyze_image(file_path, api_key)
-
+            metadata = analyze_video(file_path, api_key, progress_callback)
             metadata["filename"] = file_path.name
-            metadata["file_type"] = file_type
+            metadata["file_type"] = "video"
             metadata["original_path"] = str(file_path)
             metadata["is_ai"] = is_ai
             metadata["is_photo"] = is_photo
@@ -1128,6 +1375,15 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     embedded = embed_pixta_metadata(all_results, progress_callback)
     if progress_callback:
         progress_callback(f"  メタデータ埋め込み完了: {embedded}件")
+
+    # 動画メタデータをJSONに保存（工程4で使い回すため）
+    video_meta_list = [r for r in all_results if r.get("file_type") == "video"]
+    if video_meta_list:
+        video_meta_path = csv_folder / "video_metadata.json"
+        with open(video_meta_path, "w", encoding="utf-8") as f:
+            json.dump(video_meta_list, f, ensure_ascii=False, indent=2)
+        if progress_callback:
+            progress_callback(f"  動画メタデータ保存: {video_meta_path.name}（{len(video_meta_list)}件）")
 
     elapsed = time.time() - start_time
     minutes = int(elapsed // 60)
@@ -1228,27 +1484,6 @@ def create_vector_zip(subfolder: Path, eps_path: Path, png_path: Path) -> Path:
     return zip_path
 
 
-def _analyze_image_no_bg(file_path: Path, api_key: str) -> dict:
-    mime_type, _ = mimetypes.guess_type(str(file_path))
-    if not mime_type:
-        mime_type = "image/png"
-
-    with open(file_path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
-
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": IMAGE_PROMPT},
-                {"inline_data": {"mime_type": mime_type, "data": image_data}}
-            ]
-        }],
-        "generationConfig": {"responseMimeType": "application/json"}
-    }
-
-    text = call_gemini_api(api_key, payload)
-    return parse_json_response(text)
-
 
 def process_vector_files(input_folder: str, api_key: str, progress_callback=None) -> dict:
     input_path = Path(input_folder)
@@ -1267,56 +1502,75 @@ def process_vector_files(input_folder: str, api_key: str, progress_callback=None
     csv_folder = input_path / "csv_output"
     csv_folder.mkdir(exist_ok=True)
 
-    for i, subfolder in enumerate(subfolders, 1):
-        if progress_callback:
-            progress_callback(f"[Vector] [{i}/{len(subfolders)}] 処理中: {subfolder.name}")
-
+    # PNG/EPSペアを収集
+    valid_pairs = []  # (subfolder, png_path, eps_path)
+    for subfolder in subfolders:
         png_files = sorted(subfolder.glob("*.png"))
         eps_files = sorted(subfolder.glob("*.eps"))
-
         if not png_files:
             errors.append({"filename": subfolder.name, "error": "PNG not found"})
             continue
         if not eps_files:
             errors.append({"filename": subfolder.name, "error": "EPS not found"})
             continue
+        valid_pairs.append((subfolder, png_files[0], eps_files[0]))
 
-        png_path = png_files[0]
-        eps_path = eps_files[0]
+    # BATCH_MAX枚ずつバッチ処理
+    for batch_start in range(0, len(valid_pairs), BATCH_MAX):
+        batch = valid_pairs[batch_start:batch_start + BATCH_MAX]
+        batch_paths = [png_path for _, png_path, _ in batch]
+
+        if progress_callback:
+            names = ", ".join(p.name for _, p, _ in batch)
+            progress_callback(f"[Vector] バッチ解析中（{len(batch)}枚）: {names}")
 
         try:
-            if progress_callback:
-                progress_callback(f"  Gemini解析中: {png_path.name}...")
-            metadata = _analyze_image_no_bg(png_path, api_key)
+            batch_results = analyze_images_batch(
+                batch_paths, api_key, bg_prompt="", progress_callback=progress_callback
+            )
 
-            # ベクタータグを追加
-            adobe_kws = [k.strip() for k in metadata.get("adobe_keywords_en", "").split(",") if k.strip()]
-            if "vector" not in [k.lower() for k in adobe_kws]:
-                adobe_kws.insert(0, "vector")
-            metadata["adobe_keywords_en"] = ", ".join(adobe_kws[:49])
+            if len(batch_results) < len(batch):
+                for j in range(len(batch_results), len(batch)):
+                    subfolder, _, _ = batch[j]
+                    errors.append({"filename": subfolder.name, "error": "バッチレスポンスに結果なし"})
 
-            ss_kws = [k.strip() for k in metadata.get("shutterstock_keywords_en", "").split(",") if k.strip()]
-            if "vector" not in [k.lower() for k in ss_kws]:
-                ss_kws.insert(0, "vector")
-            metadata["shutterstock_keywords_en"] = ", ".join(ss_kws[:50])
+            for j, metadata in enumerate(batch_results):
+                if j >= len(batch):
+                    break
+                subfolder, png_path, eps_path = batch[j]
 
-            pixta_kws = [k.strip() for k in metadata.get("pixta_keywords_ja", "").split(",") if k.strip()]
-            if "ベクター" not in pixta_kws:
-                pixta_kws.insert(0, "ベクター")
-            metadata["pixta_keywords_ja"] = ", ".join(pixta_kws[:50])
+                # ベクタータグを追加
+                adobe_kws = [k.strip() for k in metadata.get("adobe_keywords_en", "").split(",") if k.strip()]
+                if "vector" not in [k.lower() for k in adobe_kws]:
+                    adobe_kws.insert(0, "vector")
+                metadata["adobe_keywords_en"] = ", ".join(adobe_kws[:49])
 
-            metadata["filename"] = eps_path.name
-            metadata["file_type"] = "vector"
-            metadata["original_path"] = str(eps_path)
-            metadata["subfolder"] = str(subfolder)
-            metadata["eps_path"] = str(eps_path)
-            metadata["png_path"] = str(png_path)
-            results.append(metadata)
+                ss_kws = [k.strip() for k in metadata.get("shutterstock_keywords_en", "").split(",") if k.strip()]
+                if "vector" not in [k.lower() for k in ss_kws]:
+                    ss_kws.insert(0, "vector")
+                metadata["shutterstock_keywords_en"] = ", ".join(ss_kws[:50])
+
+                pixta_kws = [k.strip() for k in metadata.get("pixta_keywords_ja", "").split(",") if k.strip()]
+                if "ベクター" not in pixta_kws:
+                    pixta_kws.insert(0, "ベクター")
+                metadata["pixta_keywords_ja"] = ", ".join(pixta_kws[:50])
+
+                metadata["filename"] = eps_path.name
+                metadata["file_type"] = "vector"
+                metadata["original_path"] = str(eps_path)
+                metadata["subfolder"] = str(subfolder)
+                metadata["eps_path"] = str(eps_path)
+                metadata["png_path"] = str(png_path)
+                results.append(metadata)
+
+                if progress_callback:
+                    progress_callback(f"  完了: {eps_path.name} → {metadata.get('adobe_title_en', '')[:50]}")
 
         except Exception as e:
-            errors.append({"filename": subfolder.name, "error": str(e)})
+            for subfolder, _, _ in batch:
+                errors.append({"filename": subfolder.name, "error": str(e)})
             if progress_callback:
-                progress_callback(f"  [NG] エラー: {e}")
+                progress_callback(f"  [NG] バッチエラー: {e}")
 
     if results:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
