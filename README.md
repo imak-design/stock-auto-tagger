@@ -2,6 +2,8 @@
 
 Gemini AI を使ってストック素材（画像・動画・ベクターEPS）のタイトル・タグを自動生成し、Adobe Stock / Shutterstock / Pixta へブラウザ経由で一括アップロード・審査提出するツールです。
 
+> **[HTMLマニュアル](https://imak-design.github.io/stock-auto-tagger/manual.html)** — 図解付きの詳しい使い方はこちら
+
 ## できること
 
 1. **AI タグ自動生成**: Gemini 2.5 Flash で画像・動画を解析し、3サイト分のタイトル・キーワード・カテゴリを一括生成
