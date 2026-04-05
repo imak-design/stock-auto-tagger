@@ -202,8 +202,10 @@ li { margin-bottom: 6px; }
     <p>ストック素材（画像・動画・ベクター EPS）を <strong>3 つのストックフォトサイト</strong>に一括登録するための自動化ツールです。</p>
     <ul style="margin-top:12px">
       <li><strong>Gemini AI</strong> で画像・動画を解析し、英語/日本語のタイトル・キーワード・カテゴリを自動生成</li>
+      <li><strong>バッチ処理</strong>: 画像を最大10枚ずつまとめて1リクエストで解析（API消費を大幅削減）</li>
       <li><strong>Playwright</strong> でブラウザを自動操作し、ファイルアップロード → メタデータ適用 → 審査提出まで全自動</li>
-      <li>GUI（Tkinter）でボタンを押すだけで操作可能</li>
+      <li><strong>全自動パイプライン</strong>: タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</li>
+      <li>GUI（Tkinter）でボタンを押すだけ��操作可能。API概算リクエスト数やアップロード制限も自動チェック</li>
     </ul>
   </div>
 
@@ -225,13 +227,13 @@ li { margin-bottom: 6px; }
   <div class="flow">
     <div class="flow-step step-file">バリエーションリネーム<br><span class="sub">Gemini Flash-Lite で色名判定</span></div>
     <div class="flow-arrow">↓</div>
-    <div class="flow-step step-ai">工程1: Gemini AI 解析 → CSV / メタデータ生成<br><span class="sub">画像・動画・ベクター・写真・AI 全素材を一括解析</span></div>
+    <div class="flow-step step-ai">工程1: Gemini AI バッチ解析 → CSV / メタデータ生成<br><span class="sub">画像を最大10枚ずつバッチ��理。動画・ベクター・写真・AI全素材を一括解析</span></div>
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-upload">工程2: Adobe Stock アップロード<br><span class="sub">通常素材（画像+動画）→ ベクター → AI素材 → 写真</span></div>
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-upload">工程3: Shutterstock アップロード<br><span class="sub">通常素材（画像+動画）→ ベクター → 写真（提出時に画像タブ→動画タブの順）</span></div>
     <div class="flow-arrow">↓</div>
-    <div class="flow-step step-upload">工程4: Pixta アップロード<br><span class="sub">通常画像 → 動画（個別Gemini解析）→ ベクター(ZIP) → 写真 → AI素材</span></div>
+    <div class="flow-step step-upload">工程4: Pixta アップロード<br><span class="sub">通常画像 → 動画（工程1の結果を使い回し）→ ベクター(ZIP) → 写真 → AI素材</span></div>
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-file">工程5: ファイル移動<br><span class="sub">処理済みファイルをアーカイブへ</span></div>
   </div>
@@ -241,7 +243,7 @@ li { margin-bottom: 6px; }
   <table>
     <tr><th>ボタン</th><th>処理内容</th></tr>
     <tr><td><strong>工程0</strong></td><td>リネーム → 工程1〜5 を全自動実行</td></tr>
-    <tr><td><strong>工程1</strong></td><td>Gemini 解析 → CSV 生成 → メタデータ埋込</td></tr>
+    <tr><td><strong>工程1</strong></td><td>Gemini バッチ解析 → CSV 生成 → メタデータ埋込 → 工程2〜5 を自動実行</td></tr>
     <tr><td><strong>工程2</strong></td><td>Adobe Stock にアップロード → 審査提出</td></tr>
     <tr><td><strong>工程3</strong></td><td>Shutterstock にアップロード → 審査提出</td></tr>
     <tr><td><strong>工程4</strong></td><td>Pixta に画像 + 動画 + Vector アップロード → 審査申請</td></tr>
@@ -373,13 +375,13 @@ echo GEMINI_API_KEY=ここにキーを貼付 > %USERPROFILE%\.stock-auto-tagger\
 
   <h3>無料枠の目安（Gemini 2.5 Flash）</h3>
   <div class="card-sm">
-    <p>無料 API キーは <strong>1日25リクエスト</strong>（1分5リクエスト）の上限があります。画像1枚 = 1リクエスト。</p>
+    <p>無料 API キーは <strong>1日20リクエスト</strong>（1分5リクエスト）の上限があります。バッチ処理により画像最大10枚 = 1リクエスト。</p>
     <table>
       <tr><th>モード</th><th>1日あたり</th></tr>
-      <tr><td>工程1のみ（タグ生成）</td><td>約 20 枚</td></tr>
-      <tr><td>工程0（リネーム + タグ生成）</td><td>約 10 枚</td></tr>
+      <tr><td>工程1のみ（タグ生成）</td><td>約 100〜200 枚（画像のみ。動画は1本 = 1リクエスト）</td></tr>
+      <tr><td>工程0（リネーム + タグ生成）</td><td>リネームにもリクエストを使うため、やや少なくなります</td></tr>
     </table>
-    <p class="sub">上限は太平洋時間の深夜0時（日本時間 17:00）にリセットされます。</p>
+    <p class="sub">上限は太平洋時間の深夜0時（日本時間 17:00）にリセットされます。起動時にUI上でAPI概算リクエスト数が自動表示されます。</p>
   </div>
 
   <div class="alert">
@@ -426,13 +428,12 @@ python pixta_login.py         # Pixta</code></pre>
   <div class="flow">
     <div class="flow-step step-file">1. <code>input_folder</code> に素材ファイルを入れる</div>
     <div class="flow-arrow">↓</div>
-    <div class="flow-step step-ai">2. 工程1: AI がタグ・タイトルを自動生成</div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-upload">3. 工程2〜4: 各サイトにアップロード</div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-file">4. 工程5: 処理済みファイルを移動</div>
+    <div class="flow-step step-ai">2. 工程1 を押す → タグ生成 → 全サイトアップロード → ファイル移動まで全自動</div>
   </div>
-  <p>または <strong>工程0</strong> で全工程を一気通貫実行できます。</p>
+  <p>バリエーションリネームも行う場合は <strong>工程0</strong> を押してください。</p>
+  <div class="alert-info alert">
+    起動時に素材フォルダの内容から <strong>API概算リクエスト数</strong> が自動表示されます。アップロード前には <strong>ファイルサイズ制限</strong>（Adobe 45MB / Pixta PNG 30MB / Shutterstock 50MB / Pixta 50枚）のバリデーションも自動実行されます。
+  </div>
 </section>
 
 <!-- 8. Folders -->
@@ -474,7 +475,8 @@ python pixta_login.py         # Pixta</code></pre>
       <tr><th>サイト</th><th>停止位置</th></tr>
       <tr><td>Adobe Stock</td><td>CSV 適用 → コンテンツタイプ設定 → 全選択完了 → <strong>「審査に登録」ボタン手前</strong></td></tr>
       <tr><td>Shutterstock</td><td>CSV 適用完了 → <strong>提出ボタン手前</strong></td></tr>
-      <tr><td>Pixta</td><td>AI チェック → 全選択完了 → <strong>「選択した作品を登録」ボタン手前</strong></td></tr>
+      <tr><td>Pixta 画像</td><td>AI チェック → 全選択完了 → <strong>「選択した作品を登録」ボタン手前</strong></td></tr>
+      <tr><td>Pixta 動画</td><td>タイトル/タグ入力完了 → <strong>審査申請の手前</strong></td></tr>
     </table>
 
     <div class="flow" style="margin-top:16px">
@@ -487,7 +489,9 @@ python pixta_login.py         # Pixta</code></pre>
 
     <ul style="margin-top: 12px">
       <li>テストモード時はファイル移動もスキップ → 同じ素材で繰り返しテスト可能</li>
-      <li>工程0（一気通貫）ではブラウザを閉じると次のサイトの処理に自動的に進みます</li>
+      <li>ブラウザを閉じると次のサイトの処理に自動的に進みます。ブラウザ待機中はポップアップで通知されます</li>
+      <li>ブラウザ内でページ遷移（審査申請ページへ移動など）しても問題ありません</li>
+      <li>各工程の完了時には処理時間が表示されます</li>
     </ul>
   </div>
 </section>
@@ -580,7 +584,7 @@ python pixta_login.py         # Pixta</code></pre>
   <div class="card-sm">
     <table>
       <tr><th>サービス</th><th>料金</th></tr>
-      <tr><td>Gemini API（無料枠）</td><td>無料（1日25リクエスト）</td></tr>
+      <tr><td>Gemini API（無料枠）</td><td>無料（1日20リクエスト、バッチ処理で画像最大10枚/リクエスト）</td></tr>
       <tr><td>Gemini API（有料）</td><td><a href="https://ai.google.dev/pricing">Google AI 料金ページ</a> 参照</td></tr>
       <tr><td>Adobe Stock / Shutterstock / Pixta</td><td>コントリビューター登録は無料</td></tr>
     </table>
