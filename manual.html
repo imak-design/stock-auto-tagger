@@ -165,6 +165,144 @@ li { margin-bottom: 6px; }
 .toc a:hover { color: #64ffda; }
 
 .sub { color: #8892b0; font-size: .9rem; }
+
+/* GUI Mockup */
+.gui-mock {
+  background: #0a0a1a;
+  border: 2px solid #2a2a4a;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 20px 0;
+  font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+  max-width: 700px;
+}
+.gui-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 16px; }
+.gui-title span:first-child { color: #fff; }
+.gui-title .accent { color: #e94560; }
+.gui-title .sub-title { color: #8892b0; font-size: .75rem; margin-left: 10px; }
+.gui-card {
+  background: #1a1a2e;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.gui-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: .85rem;
+}
+.gui-row:last-child { margin-bottom: 0; }
+.gui-label { color: #8892b0; font-weight: bold; min-width: 120px; font-size: .8rem; }
+.gui-input {
+  flex: 1;
+  background: #0f0f23;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 5px 8px;
+  color: #64ffda;
+  font-size: .8rem;
+}
+.gui-btn-sm {
+  background: #0f3460;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: .75rem;
+  cursor: default;
+}
+.gui-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #e0e0e0;
+  font-size: .8rem;
+}
+.gui-checkbox .box {
+  width: 14px; height: 14px;
+  border: 1px solid #8892b0;
+  border-radius: 3px;
+  display: inline-block;
+  background: #0a0a1a;
+  text-align: center;
+  line-height: 14px;
+  font-size: 10px;
+  color: #64ffda;
+}
+.gui-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.gui-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: .8rem;
+  cursor: default;
+  white-space: nowrap;
+}
+.btn-step0 { background: #64ffda; color: #0a0a1a; }
+.btn-step1 { background: #e94560; color: #fff; }
+.btn-adobe { background: #0f3460; color: #7ec8e3; }
+.btn-ss { background: #2a1a3e; color: #c49bff; }
+.btn-pixta { background: #3a1a2a; color: #ff9bcc; }
+.btn-move { background: #1a2e1a; color: #9bffb0; }
+.gui-status { color: #8892b0; font-size: .75rem; margin-left: 8px; }
+.gui-estimate { color: #6c7086; font-size: .7rem; margin-left: auto; }
+.gui-progress {
+  height: 6px;
+  background: #0f0f23;
+  border-radius: 3px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+.gui-progress-bar {
+  height: 100%;
+  width: 65%;
+  background: linear-gradient(90deg, #0f3460, #64ffda);
+  border-radius: 3px;
+}
+.gui-log {
+  background: #0f0f23;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: .72rem;
+  line-height: 1.6;
+  color: #e0e0e0;
+  max-height: 140px;
+  overflow: hidden;
+}
+.gui-log .ok { color: #64ffda; }
+.gui-log .info { color: #7ec8e3; }
+.gui-log .warn { color: #e94560; }
+.gui-log .dim { color: #6c7086; }
+.gui-annotation {
+  position: relative;
+  margin: 24px 0 12px;
+}
+.gui-annotation .line {
+  position: absolute;
+  border-left: 2px solid #e94560;
+  height: 100%;
+  left: -16px;
+  top: 0;
+}
+.gui-callout {
+  background: #2a1a2a;
+  border: 1px solid #e94560;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  font-size: .85rem;
+  color: #ff9b9b;
+}
+.gui-callout strong { color: #e94560; }
 </style>
 </head>
 <body>
@@ -217,6 +355,62 @@ li { margin-bottom: 6px; }
     <tr><td>Pixta</td><td class="center">JPG / PNG</td><td class="center">MP4 / MOV</td><td class="center">ZIP (EPS+PNG)</td></tr>
   </table>
   <p class="sub">※ Shutterstock は PNG 非対応のため、JPG と動画のみアップロードされます。</p>
+
+  <h3>GUI 画面イメージ</h3>
+  <div class="gui-mock">
+    <div class="gui-title">
+      <span>Stock Media</span><span class="accent"> Auto Tagger</span>
+      <span class="sub-title">Adobe Stock · Shutterstock · Pixta</span>
+    </div>
+    <div class="gui-card">
+      <div class="gui-row">
+        <span class="gui-label">素材フォルダ</span>
+        <span class="gui-input">/Users/you/Desktop/stock_input</span>
+        <span class="gui-btn-sm">参照</span>
+      </div>
+      <div class="gui-row">
+        <span class="gui-label">バリエーションフォルダ</span>
+        <span class="gui-input" style="color:#6c7086"></span>
+        <span class="gui-btn-sm">参照</span>
+      </div>
+      <div class="gui-row">
+        <span class="gui-label">アップロード先</span>
+        <span class="gui-checkbox"><span class="box">✓</span> Adobe</span>
+        <span class="gui-checkbox"><span class="box">✓</span> Shutterstock</span>
+        <span class="gui-checkbox"><span class="box">✓</span> Pixta</span>
+      </div>
+      <div class="gui-row">
+        <span class="gui-label">モード</span>
+        <span class="gui-checkbox"><span class="box"></span> テストモード（審査申請をスキップ）</span>
+      </div>
+    </div>
+    <div class="gui-btns">
+      <span class="gui-btn btn-step0">⚡ 【工程0】リネーム → 全自動</span>
+      <span class="gui-btn btn-step1">▶ 【工程1】タグ生成 & CSV出力</span>
+      <span class="gui-status">待機中</span>
+      <span class="gui-estimate">概算 3 リクエスト</span>
+    </div>
+    <div class="gui-btns">
+      <span class="gui-btn btn-adobe">☁ 【工程2】Adobe</span>
+      <span class="gui-btn btn-ss">☁ 【工程3】Shutterstock</span>
+      <span class="gui-btn btn-pixta">🌸 【工程4】Pixta</span>
+      <span class="gui-btn btn-move">📦 【工程5】ファイル移動</span>
+    </div>
+    <div class="gui-progress"><div class="gui-progress-bar"></div></div>
+    <div class="gui-log">
+      <div class="info">⚡ 工程0 開始: リネーム → 全自動パイプライン</div>
+      <div>[1〜10/25] バッチ解析中: image1.png, image2.png, ...</div>
+      <div>&nbsp; 完了: image1.png → Colorful abstract wave pattern</div>
+      <div>&nbsp; 完了: image2.png → Blue gradient background with light</div>
+      <div class="ok">✓ タグ生成完了！ 成功: 25件 / エラー: 0件</div>
+      <div class="info">アップロードパイプラインを開始します...</div>
+      <div>────────────────────────────</div>
+      <div class="info">☁ Adobe Stock アップロード開始...</div>
+    </div>
+  </div>
+  <div class="gui-callout">
+    <strong>ポイント:</strong> 右上の「概算 N リクエスト」で、処理前にAPI消費量を確認できます。工程1を押すだけで、タグ生成から全サイトアップロード、ファイル移動まで全自動で実行されます。
+  </div>
 </section>
 
 <!-- 2. Flow -->
@@ -236,6 +430,18 @@ li { margin-bottom: 6px; }
     <div class="flow-step step-upload">工程4: Pixta アップロード<br><span class="sub">通常画像 → 動画（工程1の結果を使い回し）→ ベクター(ZIP) → 写真 → AI素材</span></div>
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-file">工程5: ファイル移動<br><span class="sub">処理済みファイルをアーカイブへ</span></div>
+  </div>
+
+  <h3>バッチ処理の仕組み</h3>
+  <div class="card">
+    <p>工程1では画像を <strong>背景タイプ別</strong> に分類し、<strong>最大10枚ずつ</strong> まとめて1リクエストで処理します。</p>
+    <table>
+      <tr><th>グループ</th><th>対象</th><th>プロンプト追記</th></tr>
+      <tr><td>透過なし</td><td>JPEG + 透過なし PNG</td><td>なし</td></tr>
+      <tr><td>透過あり（黒背景なし）</td><td>透過 PNG</td><td>透過背景の説明</td></tr>
+      <tr><td>透過あり＋黒背景</td><td>透過 PNG（黒背景あり）</td><td>透過＋黒背景の説明</td></tr>
+    </table>
+    <p style="margin-top:12px">動画は個別処理（1本 = 1リクエスト）ですが、工程1で解析した結果は <code>video_metadata.json</code> に保存され、工程4の Pixta 動画アップロード時にそのまま使い回されます（API再呼び出し不要）。</p>
   </div>
 
   <h3>個別実行</h3>
@@ -493,6 +699,34 @@ python pixta_login.py         # Pixta</code></pre>
       <li>ブラウザ内でページ遷移（審査申請ページへ移動など）しても問題ありません</li>
       <li>各工程の完了時には処理時間が表示されます</li>
     </ul>
+  </div>
+
+  <h3>テストモード時のログ例</h3>
+  <div class="gui-mock">
+    <div class="gui-card" style="padding:8px 12px;margin-bottom:8px">
+      <div class="gui-row" style="margin:0">
+        <span class="gui-label" style="min-width:auto">モード</span>
+        <span class="gui-checkbox"><span class="box">✓</span> テストモード（審査申請をスキップ）</span>
+      </div>
+    </div>
+    <div class="gui-log" style="max-height:200px">
+      <div class="warn">⚠ テストモードで実行中（審査申請はスキップされます）</div>
+      <div class="ok">✓ タグ生成完了！ 成功: 5件 / エラー: 0件 (42秒)</div>
+      <div class="info">アップロードパイプラインを開始します...</div>
+      <div>────────────────────────────</div>
+      <div class="info">☁ Adobe Stock アップロード開始...</div>
+      <div>&nbsp; ファイルアップロード完了: 5件</div>
+      <div>&nbsp; CSV適用完了 / コンテンツタイプ設定完了</div>
+      <div>[テストモード] 審査申請をスキップしました。</div>
+      <div class="dim">ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。</div>
+      <div class="dim">ブラウザが閉じられました。</div>
+      <div class="ok">[OK] Adobe 完了: 5件 (処理時間: 1分23秒)</div>
+      <div>────────────────────────────</div>
+      <div class="info">☁ Shutterstock アップロード開始...</div>
+    </div>
+  </div>
+  <div class="gui-callout">
+    <strong>ブラウザ待機中:</strong> 「ブラウザを開いたままにします」のログが出たらポップアップでも通知されます。ブラウザ上でタイトルやタグを確認・修正し、必要なら手動で審査申請してください。ブラウザを閉じると自動的に次のサイトへ進みます。
   </div>
 </section>
 
