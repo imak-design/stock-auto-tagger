@@ -106,7 +106,7 @@ cp config.example.json config.json
 
 | サブフォルダ | 用途 | 必要な人 |
 |:---:|------|------|
-| `AI/` | AI生成素材 | Adobe・Pixta で AI生成フラグを自動ONにしたい人 |
+| `AI/` | AI生成画像 | AI で生成した画像は必ずここに入れてください（Adobe・Pixta で AI生成の申告が自動設定されます） |
 | `Photo/` | 写真素材 | Adobe で写真カテゴリ、Pixta で写真ページにアップしたい人 |
 | `Vector/` | ベクター素材（EPS + PNG） | EPS ファイルをアップロードする人 |
 
