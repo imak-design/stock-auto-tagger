@@ -266,6 +266,7 @@ class StockTaggerApp:
         variation_frame.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
 
         self.variation_folder_var = tk.StringVar(value=self.config.get("variation_folder", ""))
+        self.variation_folder_var.trace_add("write", self._update_estimate)
         variation_entry = ttk.Entry(variation_frame, textvariable=self.variation_folder_var, width=48)
         variation_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -457,13 +458,14 @@ class StockTaggerApp:
         self._update_estimate()
 
     def _update_estimate(self, *args):
-        """素材フォルダの内容からAPI概算リクエスト数を表示"""
+        """素材フォルダ＋バリエーションフォルダの内容からAPI概算リクエスト数を表示"""
         folder = self.folder_var.get().strip()
         if not folder or not Path(folder).exists():
             self.estimate_label.config(text="")
             return
         try:
-            est = estimate_api_requests(folder)
+            variation = self.variation_folder_var.get().strip() if hasattr(self, 'variation_folder_var') else ""
+            est = estimate_api_requests(folder, variation)
             if est["total_requests"] > 0:
                 self.estimate_label.config(
                     text=f"概算 {est['total_requests']} リクエスト")
@@ -1152,9 +1154,10 @@ class StockTaggerApp:
         folder_path = _Path(folder)
         from stock_tagger import get_ai_files as _get_ai_files, get_photo_files as _get_photo_files
         targets = get_upload_targets(folder_path, "adobe")
+        vector_eps = get_vector_eps_files(folder_path)
         photo_files = _get_photo_files(folder_path)
         ai_files = _get_ai_files(folder_path)
-        if not targets and not photo_files and not ai_files:
+        if not targets and not vector_eps and not photo_files and not ai_files:
             messagebox.showerror("エラー", "Adobeにアップロード対象のファイルがありません。")
             return
 
@@ -1167,11 +1170,13 @@ class StockTaggerApp:
         csv_path = csvs[0]
 
         # --- 開始前確認ダイアログ ---
-        all_targets = targets + photo_files + ai_files
+        all_targets = targets + vector_eps + photo_files + ai_files
         file_list = "\n".join(f"  {f.name}" for f in all_targets[:10])
         if len(all_targets) > 10:
             file_list += f"\n  ...他{len(all_targets) - 10}件"
         extra_notes = []
+        if vector_eps:
+            extra_notes.append(f"ベクター: {len(vector_eps)}件")
         if photo_files:
             extra_notes.append(f"写真: {len(photo_files)}件")
         if ai_files:
@@ -1185,9 +1190,6 @@ class StockTaggerApp:
 
         self._disable_btn(self.adobe_btn)
         self._log("\n☁ Adobe Stock アップロード開始（ブラウザ直接アップロード）...", "info")
-
-        # ベクター EPS ファイルも準備
-        vector_eps = get_vector_eps_files(folder_path)
 
         def run():
             import time as _time

@@ -285,8 +285,8 @@ def analyze_image(file_path: Path, api_key: str) -> dict:
 BATCH_MAX = 10  # バッチ処理の最大枚数
 
 
-def estimate_api_requests(input_folder: str) -> dict:
-    """素材フォルダ内のファイル数からAPIリクエスト数を概算する"""
+def estimate_api_requests(input_folder: str, variation_folder: str = "") -> dict:
+    """素材フォルダ＋バリエーションフォルダ内のファイル数からAPIリクエスト数を概算する"""
     import math
     input_path = Path(input_folder)
     if not input_path.exists():
@@ -304,6 +304,19 @@ def estimate_api_requests(input_folder: str) -> dict:
         scan_dirs.append(ai_folder)
     if photo_folder.exists():
         scan_dirs.append(photo_folder)
+
+    # バリエーションフォルダも集計対象に含める
+    if variation_folder:
+        var_path = Path(variation_folder)
+        if var_path.exists():
+            for d in var_path.iterdir():
+                if d.is_dir() and d.name != "movie":
+                    scan_dirs.append(d)
+            movie_dir = var_path / "movie"
+            if movie_dir.exists():
+                for d in movie_dir.iterdir():
+                    if d.is_dir():
+                        scan_dirs.append(d)
 
     for d in scan_dirs:
         for f in d.iterdir():
