@@ -438,8 +438,7 @@ li { margin-bottom: 6px; }
     <table>
       <tr><th>グループ</th><th>対象</th><th>プロンプト追記</th></tr>
       <tr><td>透過なし</td><td>JPEG + 透過なし PNG</td><td>なし</td></tr>
-      <tr><td>透過あり（黒背景なし）</td><td>透過 PNG</td><td>透過背景の説明</td></tr>
-      <tr><td>透過あり＋黒背景</td><td>透過 PNG（黒背景あり）</td><td>透過＋黒背景の説明</td></tr>
+      <tr><td>透過あり</td><td>透過 PNG</td><td>透過背景の説明（タイトル・キーワードに反映）</td></tr>
     </table>
     <p style="margin-top:12px">動画は個別処理（1本 = 1リクエスト）ですが、工程1で解析した結果は <code>video_metadata.json</code> に保存され、工程4の Pixta 動画アップロード時にそのまま使い回されます（API再呼び出し不要）。</p>
   </div>

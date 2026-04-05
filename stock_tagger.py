@@ -242,23 +242,14 @@ def build_background_prompt(bg_info: dict) -> str:
     """背景情報をプロンプト追記用テキストに変換（透過がある場合のみ追記）"""
     if not bg_info["has_transparent"]:
         return ""
-    lines = ["\n##【この画像の背景情報（必ず反映すること）】"]
-    if bg_info["has_transparent"] and bg_info["has_black"]:
-        lines += [
-            "- この画像は透明背景と黒背景の両方を含む素材です",
-            "- adobe_title_en に 'transparent background' と 'black background' を両方含めること",
-            "- pixta_title_ja に「透明背景」と「黒背景」を両方含めること",
-            "- adobe_keywords_en に 'transparent background', 'black background' を追加",
-            "- pixta_keywords_ja に「透明背景」「黒背景」「切り抜き」を追加",
-        ]
-    else:
-        lines += [
-            "- この画像は透明背景（アルファチャンネルあり）の素材です",
-            "- adobe_title_en に 'transparent background' を含めること",
-            "- pixta_title_ja に「透明背景」を含めること",
-            "- adobe_keywords_en に 'transparent background' を追加",
-            "- pixta_keywords_ja に「透明背景」「切り抜き」を追加",
-        ]
+    lines = [
+        "\n##【この画像の背景情報（必ず反映すること）】",
+        "- この画像は透明背景（アルファチャンネルあり）の素材です",
+        "- adobe_title_en に 'transparent background' を含めること",
+        "- pixta_title_ja に「透明背景」を含めること",
+        "- adobe_keywords_en に 'transparent background' を追加",
+        "- pixta_keywords_ja に「透明背景」「切り抜き」を追加",
+    ]
     return "\n".join(lines)
 
 
@@ -882,16 +873,6 @@ def move_to_destination(file_path: Path, dest_folder: Path) -> bool:
 UPLOAD_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi"}
 
 
-def detect_transparent_png_in_folder(folder: Path) -> bool:
-    """フォルダ内に透過PNGが1枚でもあるかチェック"""
-    for f in folder.iterdir():
-        if f.is_file() and f.suffix.lower() == ".png":
-            bg = detect_png_background(f)
-            if bg["has_transparent"]:
-                return True
-    return False
-
-
 def get_upload_targets(folder: Path, site: str) -> list:
     """
     サイト別にアップロード対象ファイルを返す。
@@ -1214,11 +1195,10 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     ai_folder_path = get_ai_folder(input_path)
     photo_folder_path = get_photo_folder(input_path)
 
-    # ── 画像を背景タイプ別にグループ分け、動画は別リスト ──
+    # ── 画像を透過有無でグループ分け、動画は別リスト ──
     video_files = []  # (file_path, is_ai, is_photo)
     img_no_transparent = []  # 透過なし（JPEG + PNG透過なし）
-    img_transparent = []  # 透過あり・黒背景なし
-    img_transparent_black = []  # 透過あり・黒背景あり
+    img_transparent = []  # 透過あり
 
     for file_path in all_files:
         ext = file_path.suffix.lower()
@@ -1230,9 +1210,7 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
             video_files.append(file_info)
         elif ext == ".png":
             bg_info = detect_png_background(file_path)
-            if bg_info["has_transparent"] and bg_info["has_black"]:
-                img_transparent_black.append(file_info)
-            elif bg_info["has_transparent"]:
+            if bg_info["has_transparent"]:
                 img_transparent.append(file_info)
             else:
                 img_no_transparent.append(file_info)
@@ -1242,8 +1220,7 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     # ── バッチグループ定義 ──
     batch_groups = [
         (img_no_transparent, ""),
-        (img_transparent, build_background_prompt({"has_transparent": True, "has_black": False})),
-        (img_transparent_black, build_background_prompt({"has_transparent": True, "has_black": True})),
+        (img_transparent, build_background_prompt({"has_transparent": True})),
     ]
 
     processed_count = 0
