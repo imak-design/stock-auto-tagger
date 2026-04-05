@@ -98,7 +98,7 @@ cp config.example.json config.json
 | `variation_folder` | バリエーション素材フォルダ（工程0で使用、不要なら空欄） |
 | `backup_folder` | バックアップ先（不要なら空欄） |
 | `enabled_sites` | アップロードするサイト（不要なサイトを配列から削除） |
-| `test_mode` | `true` にするとアップロードまで実行し審査申請をスキップ（GUI からも切替可） |
+| `test_mode` | `true`（初期値）で審査申請をスキップ。慣れたら `false` にすると全自動で審査まで実行（GUI からも切替可） |
 
 #### 素材フォルダのサブフォルダ作成
 
