@@ -486,7 +486,7 @@ def parse_json_response(text: str) -> dict:
 # CSV出力
 # ============================================================
 
-def write_adobe_stock_csv(results: list, output_path: Path):
+def write_adobe_stock_csv(results: list, output_path: Path, append: bool = False):
     adobe_cat_map = {
         "動物": "1", "建物・建築": "2", "ビジネス": "3", "飲み物": "4",
         "環境": "5", "感情と情緒": "6", "食べ物": "7", "グラフィック素材": "8",
@@ -495,9 +495,11 @@ def write_adobe_stock_csv(results: list, output_path: Path):
         "社会問題": "17", "スポーツ": "18", "テクノロジー": "19",
         "交通手段": "20", "旅行": "21",
     }
-    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+    mode = "a" if append else "w"
+    with open(output_path, mode, newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-        writer.writerow(["Filename", "Title", "Keywords", "Category", "Releases"])
+        if not append:
+            writer.writerow(["Filename", "Title", "Keywords", "Category", "Releases"])
         for r in results:
             cat_ja = r.get("adobe_category", "")
             cat_code = adobe_cat_map.get(cat_ja, "8")
@@ -513,7 +515,7 @@ def write_adobe_stock_csv(results: list, output_path: Path):
             ])
 
 
-def write_shutterstock_csv(results: list, output_path: Path):
+def write_shutterstock_csv(results: list, output_path: Path, append: bool = False):
     ss_cat_map = {
         "動物・野生生物": "Animals/Wildlife", "アート": "Art",
         "背景・テクスチャ": "Backgrounds/Textures", "建物・都市": "Buildings/Landmarks",
@@ -528,9 +530,11 @@ def write_shutterstock_csv(results: list, output_path: Path):
         "レトロ・ビンテージ": "Vintage", "抽象": "Abstract",
         "美容・ファッション": "Beauty/Fashion", "有名人": "Celebrities",
     }
-    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+    mode = "a" if append else "w"
+    with open(output_path, mode, newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-        writer.writerow(["Filename", "Description", "Keywords", "Categories", "Editorial", "Mature content", "illustration"])
+        if not append:
+            writer.writerow(["Filename", "Description", "Keywords", "Categories", "Editorial", "Mature content", "illustration"])
         for r in results:
             if Path(r.get("filename", "")).suffix.lower() == ".png":
                 continue
@@ -1537,15 +1541,6 @@ def process_vector_files(input_folder: str, api_key: str, progress_callback=None
                 errors.append({"filename": subfolder.name, "error": str(e)})
             if progress_callback:
                 progress_callback(f"  [NG] バッチエラー: {e}")
-
-    if results:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        adobe_csv = csv_folder / f"adobe_stock_vector_{timestamp}.csv"
-        ss_csv = csv_folder / f"shutterstock_vector_{timestamp}.csv"
-        write_adobe_stock_csv(results, adobe_csv)
-        write_shutterstock_csv(results, ss_csv)
-        if progress_callback:
-            progress_callback(f"\n[Vector] CSV出力: {adobe_csv.name}, {ss_csv.name}")
 
     return {"success": len(results), "errors": errors, "results": results}
 

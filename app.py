@@ -26,6 +26,7 @@ from stock_tagger import (
     process_vector_files, move_vector_subfolders,
     get_vector_eps_files, prepare_vector_zips_with_xmp,
     estimate_api_requests, validate_upload_files,
+    write_adobe_stock_csv, write_shutterstock_csv,
 )
 from adobe_portal import run_portal_automation
 
@@ -758,6 +759,20 @@ class StockTaggerApp:
             # ベクター処理
             vector_result = process_vector_files(folder, api_key, progress_cb)
             self.last_vector_results = vector_result.get("results", [])
+
+            # ベクター結果をメインCSVに追記
+            if self.last_vector_results:
+                csv_folder = Path(folder) / "csv_output"
+                adobe_csvs = sorted(csv_folder.glob("adobe_stock_*.csv"),
+                                    key=lambda f: f.stat().st_mtime, reverse=True)
+                ss_csvs = sorted(csv_folder.glob("shutterstock_*.csv"),
+                                 key=lambda f: f.stat().st_mtime, reverse=True)
+                if adobe_csvs:
+                    write_adobe_stock_csv(self.last_vector_results, adobe_csvs[0], append=True)
+                    progress_cb(f"  [Vector] Adobe CSV追記: {len(self.last_vector_results)}件 → {adobe_csvs[0].name}")
+                if ss_csvs:
+                    write_shutterstock_csv(self.last_vector_results, ss_csvs[0], append=True)
+                    progress_cb(f"  [Vector] SS CSV追記: {len(self.last_vector_results)}件 → {ss_csvs[0].name}")
 
             # 完了
             def on_complete(vr=vector_result):
