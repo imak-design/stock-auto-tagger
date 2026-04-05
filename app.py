@@ -762,7 +762,7 @@ class StockTaggerApp:
             vector_result = process_vector_files(folder, api_key, progress_cb)
             self.last_vector_results = vector_result.get("results", [])
 
-            # ベクター結果をメインCSVに追記
+            # ベクター結果をメインCSVに追記 + JSON保存
             if self.last_vector_results:
                 csv_folder = Path(folder) / "csv_output"
                 adobe_csvs = sorted(csv_folder.glob("adobe_stock_*.csv"),
@@ -775,6 +775,12 @@ class StockTaggerApp:
                 if ss_csvs:
                     write_shutterstock_csv(self.last_vector_results, ss_csvs[0], append=True)
                     progress_cb(f"  [Vector] SS CSV追記: {len(self.last_vector_results)}件 → {ss_csvs[0].name}")
+                # Pixta工程4で使い回すためJSONに保存
+                import json as _json
+                vector_meta_path = csv_folder / "vector_metadata.json"
+                with open(vector_meta_path, "w", encoding="utf-8") as _f:
+                    _json.dump(self.last_vector_results, _f, ensure_ascii=False, indent=2)
+                progress_cb(f"  [Vector] メタデータ保存: {vector_meta_path.name}（{len(self.last_vector_results)}件）")
 
             # 完了
             def on_complete(vr=vector_result):
@@ -1395,6 +1401,17 @@ class StockTaggerApp:
         video_targets = [f for f in all_targets if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
 
         vector_results = getattr(self, 'last_vector_results', [])
+        if not vector_results:
+            # メモリになければJSONから読み込み
+            import json as _json
+            vector_meta_path = folder_path / "csv_output" / "vector_metadata.json"
+            if vector_meta_path.exists():
+                try:
+                    with open(vector_meta_path, "r", encoding="utf-8") as _f:
+                        vector_results = _json.load(_f)
+                    self.last_vector_results = vector_results
+                except Exception:
+                    pass
 
         if not all_targets and not ai_files and not photo_files and not vector_results:
             messagebox.showinfo("確認", "Pixtaアップロード対象のファイルが見つかりません。")
