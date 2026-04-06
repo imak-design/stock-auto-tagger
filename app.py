@@ -65,6 +65,8 @@ class StockTaggerApp:
 
         self.config = load_config()
         self.is_running = False
+        self._uploaded_sites = set()
+        self._auto_continue = False
         self._timer_id = None
         self._timer_start = None
         self.last_results = []   # 工程1の結果を保持
@@ -317,17 +319,41 @@ class StockTaggerApp:
             font=("Helvetica", 9, "bold"))
         self.test_mode_label.pack(side=tk.LEFT, padx=(8, 0))
 
-        # 設定保存ボタン
-        ttk.Button(card, text="設定を保存",
-            style="Browse.TButton",
-            command=self._save_settings).grid(row=5, column=2, sticky="e", pady=(10, 0))
+        # API概算リクエスト数ラベル（モード行の右寄せ）
+        self.estimate_label = tk.Label(mode_frame,
+            text="",
+            bg="#16213e", fg="#a6adc8",
+            font=("Helvetica", 10, "bold"))
+        self.estimate_label.pack(side=tk.RIGHT, padx=(24, 0))
 
-        # --- 実行ボタン (1行目) ---
+        # --- 全自動ボタン行 ---
+        btn_auto = ttk.Frame(main, style="TFrame")
+        btn_auto.pack(fill=tk.X, pady=(4, 4))
+
+        self.step0_auto_btn = ttk.Button(btn_auto,
+            text="⚡  【工程0→全自動】リネーム → タグ → アップロード",
+            style="Step0.TButton",
+            command=self._start_step0_auto)
+        self.step0_auto_btn.pack(side=tk.LEFT)
+
+        self.step1_auto_btn = ttk.Button(btn_auto,
+            text="▶  【工程1→全自動】タグ生成 → アップロード",
+            style="Step1.TButton",
+            command=self._start_step1_auto)
+        self.step1_auto_btn.pack(side=tk.LEFT, padx=(12, 0))
+
+        self.status_label = tk.Label(btn_auto,
+            text="待機中",
+            bg="#1a1a2e", fg="#8892b0",
+            font=("Helvetica", 9))
+        self.status_label.pack(side=tk.LEFT, padx=(16, 0))
+
+        # --- 個別実行ボタン (1行目) ---
         btn_frame1 = ttk.Frame(main, style="TFrame")
-        btn_frame1.pack(fill=tk.X, pady=(4, 4))
+        btn_frame1.pack(fill=tk.X, pady=(0, 4))
 
         self.step0_btn = ttk.Button(btn_frame1,
-            text="⚡  【工程0】リネーム → 全自動",
+            text="⚡  【工程0】リネーム",
             style="Step0.TButton",
             command=self._start_step0)
         self.step0_btn.pack(side=tk.LEFT)
@@ -338,20 +364,7 @@ class StockTaggerApp:
             command=self._start_processing)
         self.run_btn.pack(side=tk.LEFT, padx=(12, 0))
 
-        self.status_label = tk.Label(btn_frame1,
-            text="待機中",
-            bg="#1a1a2e", fg="#8892b0",
-            font=("Helvetica", 9))
-        self.status_label.pack(side=tk.LEFT, padx=(16, 0))
-
-        # API概算リクエスト数ラベル
-        self.estimate_label = tk.Label(btn_frame1,
-            text="",
-            bg="#1a1a2e", fg="#6c7086",
-            font=("Helvetica", 8))
-        self.estimate_label.pack(side=tk.RIGHT)
-
-        # --- 実行ボタン (2行目) ---
+        # --- 個別実行ボタン (2行目) ---
         btn_frame2 = ttk.Frame(main, style="TFrame")
         btn_frame2.pack(fill=tk.X, pady=(0, 12))
 
@@ -554,6 +567,16 @@ class StockTaggerApp:
     def _enable_btn(self, btn, **_kwargs):
         btn.state(["!disabled"])
 
+    def _disable_all_btns(self):
+        for btn in [self.step0_auto_btn, self.step1_auto_btn, self.step0_btn,
+                     self.run_btn, self.adobe_btn, self.ss_btn, self.pixta_btn, self.move_btn]:
+            self._disable_btn(btn)
+
+    def _enable_all_btns(self):
+        for btn in [self.step0_auto_btn, self.step1_auto_btn, self.step0_btn,
+                     self.run_btn, self.adobe_btn, self.ss_btn, self.pixta_btn, self.move_btn]:
+            self._enable_btn(btn)
+
     def _save_settings(self):
         config = {
             "input_folder": self.folder_var.get().strip(),
@@ -564,10 +587,19 @@ class StockTaggerApp:
         save_config(config)
         self._log("設定を保存しました。", "success")
 
-    def _start_step0(self):
-        """工程0: バリエーションフォルダをリネーム → 自動で工程1へ"""
+    def _start_step0_auto(self):
+        """工程0→全自動: リネーム → 工程1 → アップロード → ファイル移動"""
+        self._start_step0(auto_continue=True)
+
+    def _start_step1_auto(self):
+        """工程1→全自動: タグ生成 → アップロード → ファイル移動"""
+        self._start_processing(auto_continue=True)
+
+    def _start_step0(self, auto_continue=False):
+        """工程0: バリエーションフォルダをリネーム"""
         if self.is_running:
             return
+        self._uploaded_sites = set()
         api_key = self.api_key_var.get().strip()
         folder = self.folder_var.get().strip()
         variation_folder = self.variation_folder_var.get().strip()
@@ -583,19 +615,18 @@ class StockTaggerApp:
 
         self._save_settings()
         self.is_running = True
-        self._disable_btn(self.step0_btn)
-        self._disable_btn(self.run_btn)
+        self._disable_all_btns()
         self.progress_var.set(0)
         self._log("\n" + "─" * 50, "dim")
         self._log("工程0開始: バリエーションフォルダをスキャン中...", "info")
 
         threading.Thread(
             target=self._run_step0,
-            args=(folder, api_key, variation_folder),
+            args=(folder, api_key, variation_folder, auto_continue),
             daemon=True
         ).start()
 
-    def _run_step0(self, folder: str, api_key: str, variation_folder: str):
+    def _run_step0(self, folder: str, api_key: str, variation_folder: str, auto_continue: bool = False):
         try:
             def progress_cb(message: str):
                 self.root.after(0, lambda m=message: self._log(m))
@@ -604,11 +635,15 @@ class StockTaggerApp:
 
             def on_rename_done():
                 self._log(f"\n✓ リネーム完了！ {count}件を移動しました", "success")
-                if count == 0:
-                    self._log("バリエーションフォルダに素材がありませんでした。素材フォルダの既存ファイルで続行します。", "info")
-                self._log("タグ生成を開始します...", "info")
-                self.is_running = False
-                self._start_processing()
+                if auto_continue:
+                    if count == 0:
+                        self._log("バリエーションフォルダに素材がありませんでした。素材フォルダの既存ファイルで続行します。", "info")
+                    self._log("タグ生成を開始します...", "info")
+                    self.is_running = False
+                    self._start_processing(auto_continue=True)
+                else:
+                    self.is_running = False
+                    self._enable_all_btns()
 
             self.root.after(0, on_rename_done)
 
@@ -618,8 +653,7 @@ class StockTaggerApp:
                 self._log(f"\n✗ エラー: {err}", "error")
                 self.status_label.config(text="エラー")
                 self.is_running = False
-                self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
-                self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
+                self._enable_all_btns()
                 messagebox.showerror("エラー", err)
             self.root.after(0, on_error)
 
@@ -631,13 +665,15 @@ class StockTaggerApp:
             self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state="disabled")
-        # テストモードのブラウザ待機通知
-        if "ブラウザを開いたままにします" in message:
+        # テストモードのブラウザ待機通知（個別実行時のみ、全自動時は不要）
+        if "ブラウザを閉じると次の処理に進みます" in message:
             self._show_topmost_popup("テストモード", "ブラウザを閉じると次の処理に進みます。")
 
-    def _start_processing(self):
+    def _start_processing(self, auto_continue=False):
         if self.is_running:
             return
+        self._uploaded_sites = set()
+
         api_key = self.api_key_var.get().strip()
         folder = self.folder_var.get().strip()
 
@@ -650,7 +686,10 @@ class StockTaggerApp:
         if not self._check_upload_limits(folder):
             return
 
-        self._ensure_sessions_then_start(folder, api_key)
+        if auto_continue:
+            self._ensure_sessions_then_start(folder, api_key, auto_continue=True)
+        else:
+            self._do_start_processing(folder, api_key, auto_continue=False)
 
     def _login_then_run(self, name: str, mod_name: str, continuation):
         """セッションがない場合にログインを促し、完了後にcontinuationを実行する。"""
@@ -669,7 +708,7 @@ class StockTaggerApp:
             self.root.after(0, continuation)
         threading.Thread(target=run_login, daemon=True).start()
 
-    def _ensure_sessions_then_start(self, folder: str, api_key: str):
+    def _ensure_sessions_then_start(self, folder: str, api_key: str, auto_continue: bool = False):
         from adobe_portal import SESSION_FILE as ADOBE_SESSION
         from shutterstock_portal import SESSION_FILE as SS_SESSION
         from pixta_portal import SESSION_FILE as PIXTA_SESSION
@@ -691,7 +730,7 @@ class StockTaggerApp:
 
             self._save_settings()
             self.is_running = True
-            self._disable_btn(self.run_btn)
+            self._disable_all_btns()
             self._log("\n" + "─" * 50, "dim")
             self._log("ログイン処理を開始します...", "info")
 
@@ -716,19 +755,20 @@ class StockTaggerApp:
                     mod._confirm_callback = None
 
                     self.root.after(0, lambda n=name: self._log(f"[OK] {n} ログイン完了", "info"))
-                self.root.after(0, lambda: self._do_start_processing(folder, api_key, already_started=True))
+                self.root.after(0, lambda: self._do_start_processing(folder, api_key, already_started=True, auto_continue=auto_continue))
 
             threading.Thread(target=run_logins, daemon=True).start()
         else:
-            self._do_start_processing(folder, api_key)
+            self._do_start_processing(folder, api_key, auto_continue=auto_continue)
 
-    def _do_start_processing(self, folder: str, api_key: str, already_started: bool = False):
+    def _do_start_processing(self, folder: str, api_key: str, already_started: bool = False, auto_continue: bool = False):
         if not already_started:
             self._save_settings()
             self.is_running = True
-            self._disable_btn(self.run_btn)
+            self._disable_all_btns()
             self.progress_var.set(0)
             self._log("\n" + "─" * 50, "dim")
+        self._auto_continue = auto_continue
         self._log(f"処理開始: {folder}", "info")
         if self.test_mode:
             self._start_timer()
@@ -821,13 +861,17 @@ class StockTaggerApp:
                     for ve in vr["errors"]:
                         self._log(f"  [Vector] エラー: {ve['filename']} - {ve['error']}", "error")
 
-                # タグ生成完了 → アップロードパイプラインへ
-                self._log("\nアップロードパイプラインを開始します...", "info")
-                threading.Thread(
-                    target=self._run_pipeline_uploads,
-                    args=(folder, api_key),
-                    daemon=True
-                ).start()
+                if self._auto_continue:
+                    # タグ生成完了 → アップロードパイプラインへ
+                    self._log("\nアップロードパイプラインを開始します...", "info")
+                    threading.Thread(
+                        target=self._run_pipeline_uploads,
+                        args=(folder, api_key),
+                        daemon=True
+                    ).start()
+                else:
+                    self.is_running = False
+                    self._enable_all_btns()
 
             self.root.after(0, on_complete)
 
@@ -837,8 +881,7 @@ class StockTaggerApp:
                 self._log(f"\n✗ エラー: {err}", "error")
                 self.status_label.config(text="エラー")
                 self.is_running = False
-                self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
-                self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
+                self._enable_all_btns()
                 messagebox.showerror("エラー", err)
 
             self.root.after(0, on_error)
@@ -857,6 +900,12 @@ class StockTaggerApp:
 
         import time as _time
         _pipeline_start = _time.time()
+
+        # テストモード時は共有Playwrightインスタンスを使用（ブラウザを開いたまま維持）
+        _pw = None
+        if self.test_mode:
+            from playwright.sync_api import sync_playwright
+            _pw = sync_playwright().start()
 
         folder_path = _Path(folder)
         csv_folder = folder_path / "csv_output"
@@ -916,8 +965,11 @@ class StockTaggerApp:
                     files=all_adobe_files,
                     confirm_submit_callback=lambda: not self.test_mode,
                     file_settings=adobe_file_settings,
+                    no_wait=self.test_mode,
+                    playwright_instance=_pw,
                 )
                 log(f"[OK] Adobe ポータル提出完了: {portal_result['submitted']}件")
+                self._uploaded_sites.add("adobe")
             except Exception as e:
                 log(f"[NG] Adobe エラー: {e}")
                 failed_services.append("Adobe Stock")
@@ -961,8 +1013,11 @@ class StockTaggerApp:
                     progress_callback=log,
                     headless=False,
                     skip_submit=self.test_mode,
+                    no_wait=self.test_mode,
+                    playwright_instance=_pw,
                 )
                 log(f"[OK] Shutterstock ポータル提出完了: {ss_portal_result['submitted']}件")
+                self._uploaded_sites.add("shutterstock")
             except Exception as e:
                 log(f"[NG] Shutterstock エラー: {e}")
                 failed_services.append("Shutterstock")
@@ -1018,8 +1073,11 @@ class StockTaggerApp:
                         progress_callback=log,
                         skip_submit=self.test_mode,
                         ai_filenames=ai_image_names,
+                        no_wait=self.test_mode,
+                        playwright_instance=_pw,
                     )
                     log(f"[OK] Pixtaイラスト完了: アップロード{pixta_result['uploaded']}件 / 審査申請{pixta_result['submitted']}件")
+                    self._uploaded_sites.add("pixta")
                 except Exception as e:
                     log(f"[NG] Pixtaイラスト エラー: {e}")
                     failed_services.append("Pixtaイラスト")
@@ -1061,6 +1119,8 @@ class StockTaggerApp:
                         progress_callback=log,
                         skip_submit=self.test_mode,
                         ai_filenames=ai_video_names,
+                        no_wait=self.test_mode,
+                        playwright_instance=_pw,
                     )
                     log(f"[OK] Pixta動画完了: アップロード{footage_result['uploaded']}件 / 審査申請{footage_result['submitted']}件")
                 except Exception as e:
@@ -1077,6 +1137,8 @@ class StockTaggerApp:
                         progress_callback=log,
                         skip_submit=self.test_mode,
                         is_photo=True,
+                        no_wait=self.test_mode,
+                        playwright_instance=_pw,
                     )
                     log(f"[OK] Pixta 写真 完了: アップロード{photo_pixta_result['uploaded']}件 / 審査申請{photo_pixta_result['submitted']}件")
                 except Exception as e:
@@ -1094,7 +1156,7 @@ class StockTaggerApp:
                 self._stop_timer()
                 self.status_label.config(text="一部エラーあり")
                 self.is_running = False
-                self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
+                self._enable_all_btns()
                 self._enable_btn(self.move_btn, bg="#e94560")
                 svc_list = "\n".join(f"• {s}" for s in failed_services)
                 self._show_topmost_popup(
@@ -1138,11 +1200,15 @@ class StockTaggerApp:
             self._log(f"✓ 全工程完了！（処理時間: {_minutes}分{_seconds}秒）", "success")
             self.status_label.config(text="完了")
             self.is_running = False
-            self._enable_btn(self.run_btn, bg="#e94560", fg="#ffffff")
-            self._enable_btn(self.step0_btn, bg="#64ffda", fg="#0a0a1a")
+            self._enable_all_btns()
             _time_str = f"{_minutes}分{_seconds}秒" if _minutes > 0 else f"{_seconds}秒"
             if self.test_mode:
-                self._show_topmost_popup("全工程完了", f"アップロード完了しました（テストモード：ファイル移動はスキップ）。\n処理時間: {_time_str}")
+                self._show_topmost_popup(
+                    "全工程完了（テストモード）",
+                    f"全サイトへのアップロードが完了しました。\n処理時間: {_time_str}\n\n"
+                    "各サイトのブラウザが開いています。\n"
+                    "タイトル・タグを確認・編集して、手動で審査申請してください。"
+                )
             else:
                 self._show_topmost_popup("全工程完了", f"アップロード＆ファイル移動まで全て完了しました。\n処理時間: {_time_str}")
 

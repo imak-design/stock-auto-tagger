@@ -27,7 +27,8 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                           expected_count: int = 0, files: list = None,
                           confirm_submit_callback=None, is_ai: bool = False,
                           content_type: str = "illustration",
-                          file_settings: dict = None):
+                          file_settings: dict = None, no_wait: bool = False,
+                          playwright_instance=None):
     """
     ポータルにファイルをアップロードし、CSV でメタデータを一括適用して審査に登録する。
 
@@ -67,7 +68,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
     if upload_csv != csv_path:
         log(f"カテゴリコードを変換しました → {upload_csv}")
 
-    with sync_playwright() as p:
+    _own_playwright = playwright_instance is None
+    p = sync_playwright().start() if _own_playwright else playwright_instance
+    try:
         browser = p.chromium.launch(
             headless=headless,
             channel="chrome",
@@ -255,6 +258,10 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             if not _keep_open:
                 context.close()
                 browser.close()
+                if _own_playwright:
+                    p.stop()
+            elif no_wait:
+                log("ブラウザを開いたままにします。（次の工程に進みます）")
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
                 try:
@@ -269,6 +276,13 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         browser.close()
                 except Exception:
                     pass
+                if _own_playwright:
+                    p.stop()
+
+    except Exception:
+        if _own_playwright:
+            p.stop()
+        raise
 
     return {"submitted": submitted, "errors": errors}
 

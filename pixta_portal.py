@@ -91,7 +91,7 @@ def _launch(p):
     return browser, context
 
 
-def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool = False, is_ai: bool = False, is_photo: bool = False, ai_filenames: set = None) -> dict:
+def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool = False, is_ai: bool = False, is_photo: bool = False, ai_filenames: set = None, no_wait: bool = False, playwright_instance=None) -> dict:
     """
     Pixta イラストアップロード → 審査申請 を全自動で実行する。
 
@@ -144,7 +144,9 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
 
     url = UPLOAD_URL_PHOTO if is_photo else UPLOAD_URL
 
-    with sync_playwright() as p:
+    _own_playwright = playwright_instance is None
+    p = sync_playwright().start() if _own_playwright else playwright_instance
+    try:
         browser, context = _launch(p)
         page = context.new_page()
         _keep_open = skip_submit
@@ -400,6 +402,10 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
             if not _keep_open:
                 context.close()
                 browser.close()
+                if _own_playwright:
+                    p.stop()
+            elif no_wait:
+                log("ブラウザを開いたままにします。（次の工程に進みます）")
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
                 try:
@@ -413,6 +419,13 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                         browser.close()
                 except Exception:
                     pass
+                if _own_playwright:
+                    p.stop()
+
+    except Exception:
+        if _own_playwright:
+            p.stop()
+        raise
 
     return {"uploaded": uploaded, "submitted": submitted, "errors": errors}
 
@@ -470,8 +483,8 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
                 log(f"--- ページ {page_num} の処理 ---")
 
                 # AI素材: 全選択の前に各アイテムのAI生成チェックボックスをON
-                if is_ai:
-                    _check_ai_generated_on_list(page, log)
+                if is_ai or ai_filenames:
+                    _check_ai_generated_on_list(page, log, ai_filenames=ai_filenames)
 
                 all_cb = page.locator("#item_submit_form #all-1")
                 try:

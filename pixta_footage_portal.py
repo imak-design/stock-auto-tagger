@@ -93,6 +93,8 @@ def run_footage_upload(
     skip_submit: bool = False,
     is_ai: bool = False,
     ai_filenames: set = None,
+    no_wait: bool = False,
+    playwright_instance=None,
 ) -> dict:
     """
     Pixta 動画アップロード → タイトル/タグ入力 → 審査申請 を全自動で実行する。
@@ -154,7 +156,9 @@ def run_footage_upload(
     submitted = 0
     _keep_open = skip_submit
 
-    with sync_playwright() as p:
+    _own_playwright = playwright_instance is None
+    p = sync_playwright().start() if _own_playwright else playwright_instance
+    try:
         browser, context = _launch(p)
         page = context.new_page()
 
@@ -390,6 +394,10 @@ def run_footage_upload(
             if not _keep_open:
                 context.close()
                 browser.close()
+                if _own_playwright:
+                    p.stop()
+            elif no_wait:
+                log("ブラウザを開いたままにします。（次の工程に進みます）")
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
                 try:
@@ -403,6 +411,13 @@ def run_footage_upload(
                         browser.close()
                 except Exception:
                     pass
+                if _own_playwright:
+                    p.stop()
+
+    except Exception:
+        if _own_playwright:
+            p.stop()
+        raise
 
     return {"uploaded": uploaded, "submitted": submitted, "errors": errors}
 

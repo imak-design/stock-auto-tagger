@@ -44,7 +44,8 @@ def _select_all(page, log):
 
 
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
-                          files: list = None, expected_count: int = 0, skip_submit: bool = False):
+                          files: list = None, expected_count: int = 0, skip_submit: bool = False,
+                          no_wait: bool = False, playwright_instance=None):
     def log(msg: str):
         if progress_callback:
             progress_callback(msg)
@@ -62,7 +63,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
     submitted = 0
     errors = []
 
-    with sync_playwright() as p:
+    _own_playwright = playwright_instance is None
+    p = sync_playwright().start() if _own_playwright else playwright_instance
+    try:
         browser = p.chromium.launch(
             headless=headless,
             channel="chrome",
@@ -150,17 +153,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         log(f"[!] 再待機タイムアウト: {current}/{expected}件で続行します")
 
             # ============================================================
-            # STEP 3: 全ファイルを選択
-            # ============================================================
-            log("全選択中...")
-            try:
-                page.locator('input[type="checkbox"]').first.wait_for(state="visible", timeout=15000)
-            except PWTimeout:
-                log("[!] チェックボックスが見つかりません。続行します...")
-            _select_all(page, log)
-
-            # ============================================================
-            # STEP 4: CSVメタデータを適用
+            # STEP 3: CSVメタデータを適用（全選択はCSV反映後に行う）
             # ============================================================
             log(f"CSV適用中: {csv_path.name}")
             csv_btn = page.locator('button[data-testid="csv-upload"]')
@@ -219,7 +212,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             log("CSV適用完了")
 
             # ============================================================
-            # STEP 5: 画像を審査提出
+            # STEP 4: 画像を審査提出
             # ============================================================
             if skip_submit:
                 log("[テストモード] 審査提出ボタンの手前で停止します。ブラウザで手動操作してください。")
@@ -246,7 +239,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 submitted += 1  # カウントは概算
 
                 # ============================================================
-                # STEP 6: 動画タブに切り替えて提出
+                # STEP 5: 動画タブに切り替えて提出
                 # ============================================================
                 log("\n動画タブに切り替え中...")
                 page.goto(VIDEO_URL, wait_until="domcontentloaded", timeout=30000)
@@ -295,6 +288,10 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             if not _keep_open:
                 context.close()
                 browser.close()
+                if _own_playwright:
+                    p.stop()
+            elif no_wait:
+                log("ブラウザを開いたままにします。（次の工程に進みます）")
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
                 try:
@@ -308,6 +305,13 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         browser.close()
                 except Exception:
                     pass
+                if _own_playwright:
+                    p.stop()
+
+    except Exception:
+        if _own_playwright:
+            p.stop()
+        raise
 
     return {"submitted": submitted, "errors": errors}
 

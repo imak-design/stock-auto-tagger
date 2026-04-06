@@ -399,9 +399,24 @@ def validate_upload_files(input_folder: str) -> list:
     return warnings
 
 
-def _build_batch_prompt(base_prompt: str, filenames: list, bg_prompt: str = "") -> str:
-    """バッチ用プロンプトを構築（ファイル名順でJSON配列を返す指示を追加）"""
-    file_list = "\n".join(f"  {i+1}. {name}" for i, name in enumerate(filenames))
+def _build_batch_prompt(base_prompt: str, filenames: list, bg_prompt: str = "",
+                        per_file_bg_prompts: list = None) -> str:
+    """バッチ用プロンプトを構築（ファイル名順でJSON配列を返す指示を追加）
+
+    per_file_bg_prompts: 画像ごとの背景情報リスト。指定時はbg_promptより優先。
+    """
+    if per_file_bg_prompts:
+        # 画像ごとに背景情報を付与
+        file_lines = []
+        for i, name in enumerate(filenames):
+            bg = per_file_bg_prompts[i] if i < len(per_file_bg_prompts) else ""
+            if bg:
+                file_lines.append(f"  {i+1}. {name} — 背景情報: {bg}")
+            else:
+                file_lines.append(f"  {i+1}. {name} — 背景情報: なし（通常背景）")
+        file_list = "\n".join(file_lines)
+    else:
+        file_list = "\n".join(f"  {i+1}. {name}" for i, name in enumerate(filenames))
     batch_instruction = (
         f"\n\n##【バッチ処理指示】\n"
         f"以下の{len(filenames)}枚の画像が順番に添付されています。\n"
@@ -409,11 +424,18 @@ def _build_batch_prompt(base_prompt: str, filenames: list, bg_prompt: str = "") 
         f"各画像に対して個別にメタデータを生成し、上記の順番通りにJSONオブジェクトの配列で返してください。\n"
         f"必ず {len(filenames)} 個のJSONオブジェクトを含む配列を返すこと。"
     )
+    if per_file_bg_prompts:
+        batch_instruction += (
+            "\n\n各画像の背景情報に従って、タイトルとキーワードに背景に関する情報を反映してください。"
+            "\n- 透明背景の画像: adobe_title_enに'transparent background'を含め、pixta_title_jaに「透明背景」を含めること。adobe_keywords_enに'transparent background'、pixta_keywords_jaに「透明背景」「切り抜き」を追加。"
+            "\n- 通常背景の画像: 背景に関する特別な記述は不要。"
+        )
+        return base_prompt + batch_instruction
     return base_prompt + bg_prompt + batch_instruction
 
 
 def analyze_images_batch(file_paths: list, api_key: str, bg_prompt: str = "",
-                         progress_callback=None) -> list:
+                         progress_callback=None, per_file_bg_prompts: list = None) -> list:
     """複数画像をFile APIでアップロードし、1リクエストでバッチ解析する"""
     uploaded_files = []
     filenames = [f.name for f in file_paths]
@@ -429,7 +451,8 @@ def analyze_images_batch(file_paths: list, api_key: str, bg_prompt: str = "",
             uploaded_files.append((file_uri, file_name, mime_type))
 
         # 2. バッチ用プロンプト構築
-        prompt = _build_batch_prompt(IMAGE_PROMPT, filenames, bg_prompt)
+        prompt = _build_batch_prompt(IMAGE_PROMPT, filenames, bg_prompt,
+                                     per_file_bg_prompts=per_file_bg_prompts)
 
         # 3. 全file_uriをまとめて1リクエスト
         parts = [{"text": prompt}]
@@ -1017,30 +1040,35 @@ RENAME_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 RENAME_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".wmv", ".webm"}
 
 
-def _rename_get_keyword(api_key: str, images_data: list) -> str:
+def _rename_get_keyword_and_colors(api_key: str, images_data: list) -> dict:
+    """全画像を1回のAPIコールでキーワードと各画像の色を取得する。
+    Returns: {"keyword": str, "colors": [str, ...]}
+    """
     parts = []
     for mime, data in images_data:
         parts.append({"inline_data": {"mime_type": mime, "data": data}})
     parts.append({"text": (
-        "These images are all color variations of the same stock illustration. "
-        "Provide a single English keyword (lowercase, no spaces) describing the visual style "
-        "(e.g. 'lightstreak', 'lightswoosh', 'starburst'). Reply with ONLY the keyword."
+        f"These {len(images_data)} images are all color variations of the same stock illustration with a black background.\n"
+        "1. Provide a single English keyword (lowercase, no spaces) describing the visual style "
+        "(e.g. 'lightstreak', 'lightswoosh', 'starburst').\n"
+        "2. For each image (in order), identify the main color of the subject or effect in the foreground. "
+        "Ignore the black background. Use a single lowercase English color name "
+        "(e.g. red, blue, cyan, pink, green, yellow, white, purple, orange).\n\n"
+        "Reply in this exact format (no extra text):\n"
+        "keyword: <keyword>\n"
+        "colors: <color1>, <color2>, <color3>, ..."
     )})
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
-
-
-def _rename_get_color(api_key: str, mime: str, data: str) -> str:
-    parts = [
-        {"inline_data": {"mime_type": mime, "data": data}},
-        {"text": (
-            "This illustration has a black background. Ignore the black background and identify "
-            "the main color of the subject or effect in the foreground. "
-            "Reply with a single lowercase English color name only "
-            "(e.g. red, blue, cyan, pink, green, yellow, white, purple, orange). "
-            "Reply with ONLY the color name."
-        )}
-    ]
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
+    response = call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip()
+    # パース
+    keyword = ""
+    colors = []
+    for line in response.split("\n"):
+        line = line.strip()
+        if line.lower().startswith("keyword:"):
+            keyword = line.split(":", 1)[1].strip().lower()
+        elif line.lower().startswith("colors:"):
+            colors = [c.strip().lower() for c in line.split(":", 1)[1].split(",")]
+    return {"keyword": keyword, "colors": colors}
 
 
 def _rename_video_keyword(api_key: str, file_uri: str, mime_type: str) -> str:
@@ -1103,13 +1131,15 @@ def rename_variation_folders(api_key: str, output_folder: str, variation_base: s
                 data = base64.b64encode(f.read()).decode("utf-8")
             images_data.append((mime, data, img))
 
-        keyword = _rename_get_keyword(api_key, [(m, d) for m, d, _ in images_data])
+        result = _rename_get_keyword_and_colors(api_key, [(m, d) for m, d, _ in images_data])
+        keyword = result["keyword"]
+        colors = result["colors"]
         if progress_callback:
-            progress_callback(f"  キーワード: {keyword}")
+            progress_callback(f"  キーワード: {keyword} / 色: {', '.join(colors)}")
 
         used_names = {}
-        for mime, data, img in images_data:
-            color = _rename_get_color(api_key, mime, data)
+        for i, (mime, data, img) in enumerate(images_data):
+            color = colors[i] if i < len(colors) else "unknown"
             base_name = f"{today}_{keyword}_{color}"
             if base_name in used_names:
                 used_names[base_name] += 1
@@ -1247,10 +1277,10 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     ai_folder_path = get_ai_folder(input_path)
     photo_folder_path = get_photo_folder(input_path)
 
-    # ── 画像を透過有無でグループ分け、動画は別リスト ──
+    # ── 画像・動画を分類し、画像ごとの背景情報を記録 ──
     video_files = []  # (file_path, is_ai, is_photo)
-    img_no_transparent = []  # 透過なし（JPEG + PNG透過なし）
-    img_transparent = []  # 透過あり
+    image_files = []  # (file_path, is_ai, is_photo)
+    image_bg_labels = []  # 画像ごとの背景ラベル（プロンプト用）
 
     for file_path in all_files:
         ext = file_path.suffix.lower()
@@ -1260,42 +1290,39 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
 
         if ext in VIDEO_EXTENSIONS:
             video_files.append(file_info)
-        elif ext == ".png":
-            bg_info = detect_png_background(file_path)
-            if bg_info["has_transparent"]:
-                img_transparent.append(file_info)
-            else:
-                img_no_transparent.append(file_info)
         else:
-            img_no_transparent.append(file_info)
-
-    # ── バッチグループ定義 ──
-    batch_groups = [
-        (img_no_transparent, ""),
-        (img_transparent, build_background_prompt({"has_transparent": True})),
-    ]
+            image_files.append(file_info)
+            if ext == ".png":
+                bg_info = detect_png_background(file_path)
+                if bg_info["has_transparent"]:
+                    image_bg_labels.append("透明背景（アルファチャンネルあり）")
+                else:
+                    image_bg_labels.append("")
+            else:
+                image_bg_labels.append("")
 
     processed_count = 0
 
-    # ── 画像バッチ処理 ──
-    for group_files, bg_prompt in batch_groups:
-        if not group_files:
-            continue
-        # BATCH_MAX枚ずつに分割
-        for batch_start in range(0, len(group_files), BATCH_MAX):
-            batch = group_files[batch_start:batch_start + BATCH_MAX]
-            batch_paths = [info[0] for info in batch]
+    # ── 画像バッチ処理（背景グループ分けなし、画像ごとに背景情報を付与） ──
+    for batch_start in range(0, len(image_files), BATCH_MAX):
+        batch = image_files[batch_start:batch_start + BATCH_MAX]
+        batch_paths = [info[0] for info in batch]
+        batch_bg_labels = image_bg_labels[batch_start:batch_start + len(batch)]
 
-            if progress_callback:
-                names = ", ".join(p.name for p in batch_paths)
-                progress_callback(f"[{processed_count + 1}〜{processed_count + len(batch)}/{total}] バッチ解析中: {names}")
-            if status_callback:
-                status_callback(processed_count + 1, total, f"バッチ {len(batch)}枚")
+        # per_file_bg_promptsが全て空なら不要
+        per_file_bg = batch_bg_labels if any(batch_bg_labels) else None
 
-            try:
-                batch_results = analyze_images_batch(
-                    batch_paths, api_key, bg_prompt, progress_callback
-                )
+        if progress_callback:
+            names = ", ".join(p.name for p in batch_paths)
+            progress_callback(f"[{processed_count + 1}〜{processed_count + len(batch)}/{total}] バッチ解析中: {names}")
+        if status_callback:
+            status_callback(processed_count + 1, total, f"バッチ {len(batch)}枚")
+
+        try:
+            batch_results = analyze_images_batch(
+                batch_paths, api_key, "", progress_callback,
+                per_file_bg_prompts=per_file_bg
+            )
 
                 # レスポンス数が足りない場合はエラー扱い
                 if len(batch_results) < len(batch):
