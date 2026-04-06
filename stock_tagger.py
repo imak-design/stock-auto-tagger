@@ -1324,40 +1324,40 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
                 per_file_bg_prompts=per_file_bg
             )
 
-                # レスポンス数が足りない場合はエラー扱い
-                if len(batch_results) < len(batch):
-                    for j in range(len(batch_results), len(batch)):
-                        fp, is_ai, is_photo = batch[j]
-                        errors.append({"filename": fp.name, "error": "バッチレスポンスに結果なし"})
-
-                for j, metadata in enumerate(batch_results):
-                    if j >= len(batch):
-                        break
+            # レスポンス数が足りない場合はエラー扱い
+            if len(batch_results) < len(batch):
+                for j in range(len(batch_results), len(batch)):
                     fp, is_ai, is_photo = batch[j]
-                    metadata["filename"] = fp.name
-                    metadata["file_type"] = "image"
-                    metadata["original_path"] = str(fp)
-                    metadata["is_ai"] = is_ai
-                    metadata["is_photo"] = is_photo
+                    errors.append({"filename": fp.name, "error": "バッチレスポンスに結果なし"})
 
-                    if is_ai:
-                        ai_results.append(metadata)
-                    elif is_photo:
-                        photo_results.append(metadata)
-                    else:
-                        results.append(metadata)
+            for j, metadata in enumerate(batch_results):
+                if j >= len(batch):
+                    break
+                fp, is_ai, is_photo = batch[j]
+                metadata["filename"] = fp.name
+                metadata["file_type"] = "image"
+                metadata["original_path"] = str(fp)
+                metadata["is_ai"] = is_ai
+                metadata["is_photo"] = is_photo
 
-                    if progress_callback:
-                        progress_callback(f"  完了: {fp.name} → {metadata.get('adobe_title_en', '')[:50]}")
+                if is_ai:
+                    ai_results.append(metadata)
+                elif is_photo:
+                    photo_results.append(metadata)
+                else:
+                    results.append(metadata)
 
-            except Exception as e:
-                # バッチ全体が失敗した場合、全ファイルをエラーに
-                for fp, _, _ in batch:
-                    errors.append({"filename": fp.name, "error": str(e)})
                 if progress_callback:
-                    progress_callback(f"  バッチエラー: {str(e)}")
+                    progress_callback(f"  完了: {fp.name} → {metadata.get('adobe_title_en', '')[:50]}")
 
-            processed_count += len(batch)
+        except Exception as e:
+            # バッチ全体が失敗した場合、全ファイルをエラーに
+            for fp, _, _ in batch:
+                errors.append({"filename": fp.name, "error": str(e)})
+            if progress_callback:
+                progress_callback(f"  バッチエラー: {str(e)}")
+
+        processed_count += len(batch)
 
     # ── 動画は個別処理 ──
     for file_path, is_ai, is_photo in video_files:
