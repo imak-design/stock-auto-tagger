@@ -862,10 +862,22 @@ python pixta_login.py         # Pixta</code></pre>
   <div class="card-sm">
     <table>
       <tr><th>サービス</th><th>料金</th></tr>
-      <tr><td>Gemini API（無料枠）</td><td>無料（1日20リクエスト、バッチ処理で画像最大10枚/リクエスト）</td></tr>
+      <tr><td>Gemini API（無料枠）</td><td>無料（以下の1日の上限あり）</td></tr>
       <tr><td>Gemini API（有料）</td><td><a href="https://ai.google.dev/pricing">Google AI 料金ページ</a> 参照</td></tr>
       <tr><td>Adobe Stock / Shutterstock / Pixta</td><td>コントリビューター登録は無料</td></tr>
     </table>
+  </div>
+
+  <h3>無料枠で1日に処理できる目安</h3>
+  <div class="card-sm">
+    <p>Gemini API の無料枠には1日の利用上限があります。このツールはバッチ処理で画像を最大10枚ずつまとめて処理するため、少ない回数で多くの素材を処理できます。</p>
+    <table>
+      <tr><th>処理内容</th><th>1日の目安</th></tr>
+      <tr><td>画像のタグ生成のみ</td><td><strong>約100〜200枚</strong></td></tr>
+      <tr><td>動画のタグ生成</td><td><strong>約20本</strong>（動画は1本ずつ処理されるため）</td></tr>
+      <tr><td>リネーム + タグ生成</td><td>リネームにもAPIを使うため、画像のみの場合より少なくなります</td></tr>
+    </table>
+    <p style="margin-top:12px">上限は毎日 日本時間 17:00 にリセットされます。それ以上処理する場合は有料プランをご検討ください。</p>
     <p class="sub">※ API の仕様・料金は変更される場合があります。最新情報は各公式サイトを参照してください。</p>
   </div>
 </section>
