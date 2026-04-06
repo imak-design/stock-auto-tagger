@@ -1596,15 +1596,46 @@ class StockTaggerApp:
         def run_move():
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
             try:
+                from send2trash import send2trash as _send2trash
+
                 result = _move(
                     move_results, move_folder,
                     lambda m: self.root.after(0, lambda msg=m: self._log(msg))
                 )
+
+                # Vector内ZIPをゴミ箱に移動（サブフォルダ移動前に実行）
+                cleanup_count = 0
+                vector_dir = _Path(move_folder) / "Vector"
+                if vector_dir.exists():
+                    for sub in vector_dir.iterdir():
+                        if sub.is_dir():
+                            for zf in sub.glob("*.zip"):
+                                try:
+                                    _send2trash(str(zf))
+                                    log(f"  🗑 Vector/{sub.name}/{zf.name}")
+                                    cleanup_count += 1
+                                except Exception:
+                                    pass
+
                 # Vectorサブフォルダも移動
                 vec_move = move_vector_subfolders(
                     move_folder,
                     lambda m: self.root.after(0, lambda msg=m: self._log(msg))
                 )
+
+                # csv_output内の一時ファイルをゴミ箱に移動
+                csv_output = _Path(move_folder) / "csv_output"
+                if csv_output.exists():
+                    for tmp_file in csv_output.iterdir():
+                        if tmp_file.is_file():
+                            try:
+                                _send2trash(str(tmp_file))
+                                log(f"  🗑 {tmp_file.name}")
+                                cleanup_count += 1
+                            except Exception:
+                                pass
+                if cleanup_count:
+                    log(f"  一時ファイル {cleanup_count}件をゴミ箱に移動しました")
 
                 def on_done():
                     total_moved = result['moved'] + vec_move['moved']
