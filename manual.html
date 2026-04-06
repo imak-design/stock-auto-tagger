@@ -381,13 +381,17 @@ li { margin-bottom: 6px; }
       <div class="gui-row">
         <span class="gui-label">モード</span>
         <span class="gui-checkbox"><span class="box"></span> テストモード（審査申請をスキップ）</span>
+        <span class="gui-estimate" style="margin-left:auto">概算 3 リクエスト</span>
       </div>
     </div>
     <div class="gui-btns">
-      <span class="gui-btn btn-step0">⚡ 【工程0】リネーム → 全自動</span>
-      <span class="gui-btn btn-step1">▶ 【工程1】タグ生成 & CSV出力</span>
+      <span class="gui-btn btn-step0">⚡ 【工程0→全自動】リネーム → タグ → アップロード</span>
+      <span class="gui-btn btn-step1">▶ 【工程1→全自動】タグ生成 → アップロード</span>
       <span class="gui-status">待機中</span>
-      <span class="gui-estimate">概算 3 リクエスト</span>
+    </div>
+    <div class="gui-btns">
+      <span class="gui-btn btn-step0" style="font-size:.75rem">⚡ 【工程0】リネーム</span>
+      <span class="gui-btn btn-step1" style="font-size:.75rem">▶ 【工程1】タグ生成 & CSV出力</span>
     </div>
     <div class="gui-btns">
       <span class="gui-btn btn-adobe">☁ 【工程2】Adobe</span>
@@ -408,7 +412,7 @@ li { margin-bottom: 6px; }
     </div>
   </div>
   <div class="gui-callout">
-    <strong>ポイント:</strong> 右上の「概算 N リクエスト」で、処理前にAPI消費量を確認できます。工程1を押すだけで、タグ生成から全サイト一括アップロード、ファイル移動まで全自動で実行されます。各サイトへのアップロードは全素材を1回にまとめて行います。
+    <strong>ポイント:</strong> モード行の右側に「概算 N リクエスト」が表示され、処理前にAPI消費量を確認できます。【工程1→全自動】を押すだけで、タグ生成から全サイト一括アップロード、ファイル移動まで全自動で実行されます。個別ボタンで1工程ずつ実行することもできます。
   </div>
 </section>
 
@@ -433,21 +437,26 @@ li { margin-bottom: 6px; }
 
   <h3>バッチ処理の仕組み</h3>
   <div class="card">
-    <p>工程1では画像を <strong>背景タイプ別</strong> に分類し、<strong>最大10枚ずつ</strong> まとめて1リクエストで処理します。</p>
+    <p>工程1では JPG/PNG を区別せず <strong>最大10枚ずつ</strong> まとめて1リクエストで処理します。透過 PNG には画像ごとに背景情報が自動付与され、タイトル・キーワードに反映されます。</p>
     <table>
-      <tr><th>グループ</th><th>対象</th><th>プロンプト追記</th></tr>
-      <tr><td>透過なし</td><td>JPEG + 透過なし PNG</td><td>なし</td></tr>
-      <tr><td>透過あり</td><td>透過 PNG</td><td>透過背景の説明（タイトル・キーワードに反映）</td></tr>
+      <tr><th>画像タイプ</th><th>背景情報</th></tr>
+      <tr><td>JPEG / 透過なし PNG</td><td>なし（通常背景）</td></tr>
+      <tr><td>透過あり PNG</td><td>「透明背景」の説明が個別に付与される</td></tr>
     </table>
     <p style="margin-top:12px">動画は個別処理（1本 = 1リクエスト）ですが、工程1で解析した結果は <code>video_metadata.json</code> に保存され、工程4の Pixta 動画アップロード時にそのまま使い回されます（API再呼び出し不要）。</p>
+    <p style="margin-top:8px">バリエーションリネーム（工程0）も最適化されており、キーワードと各画像の色名を <strong>1回のAPIコール</strong> で取得します。</p>
   </div>
 
-  <h3>個別実行</h3>
-  <p>各工程のボタンを個別に押して、必要な処理だけを実行することもできます。</p>
+  <h3>ボタン一覧</h3>
+  <p>上段の全自動ボタンは押すだけで最後まで一気通貫で実行します。下段の個別ボタンで1工程ずつ実行することもできます。</p>
   <div class="gui-mock" style="margin-bottom:20px">
     <div class="gui-btns">
-      <span class="gui-btn btn-step0">⚡ 【工程0】リネーム → 全自動</span>
-      <span class="gui-btn btn-step1">▶ 【工程1】タグ生成 & CSV出力</span>
+      <span class="gui-btn btn-step0">⚡ 【工程0→全自動】リネーム → タグ → アップロード</span>
+      <span class="gui-btn btn-step1">▶ 【工程1→全自動】タグ生成 → アップロード</span>
+    </div>
+    <div class="gui-btns">
+      <span class="gui-btn btn-step0" style="font-size:.75rem">⚡ 【工程0】リネーム</span>
+      <span class="gui-btn btn-step1" style="font-size:.75rem">▶ 【工程1】タグ生成 & CSV出力</span>
     </div>
     <div class="gui-btns">
       <span class="gui-btn btn-adobe">☁ 【工程2】Adobe</span>
@@ -457,9 +466,12 @@ li { margin-bottom: 6px; }
     </div>
   </div>
   <table>
-    <tr><th>ボタン</th><th>処理内容</th></tr>
-    <tr><td><strong>工程0</strong></td><td>リネーム → 工程1〜5 を全自動実行</td></tr>
-    <tr><td><strong>工程1</strong></td><td>Gemini バッチ解析 → CSV 生成 → メタデータ埋込 → 工程2〜5 を自動実行</td></tr>
+    <tr><th colspan="2" style="text-align:center;background:#1a4a5a">全自動ボタン</th></tr>
+    <tr><td><strong>工程0→全自動</strong></td><td>リネーム → タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
+    <tr><td><strong>工程1→全自動</strong></td><td>タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
+    <tr><th colspan="2" style="text-align:center;background:#0f3460">個別実行ボタン</th></tr>
+    <tr><td><strong>工程0</strong></td><td>バリエーションリネームのみ</td></tr>
+    <tr><td><strong>工程1</strong></td><td>Gemini バッチ解析 → CSV 生成 → メタデータ埋込のみ</td></tr>
     <tr><td><strong>工程2</strong></td><td>Adobe Stock 一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材はAIチェックON → 審査提出</td></tr>
     <tr><td><strong>工程3</strong></td><td>Shutterstock 一括アップロード → CSV適用 → 画像タブ・動画タブ順に提出</td></tr>
     <tr><td><strong>工程4</strong></td><td>Pixta 3フェーズ（1: イラスト+ベクター+AI画像 → 2: 動画+AI動画 → 3: 写真） → 審査申請</td></tr>
@@ -657,11 +669,11 @@ python pixta_login.py         # Pixta</code></pre>
   <div class="flow">
     <div class="flow-step step-file">1. <code>input_folder</code> に素材ファイルを入れる</div>
     <div class="flow-arrow">↓</div>
-    <div class="flow-step step-ai">2. 工程1 を押す → タグ生成 → 全サイトアップロード → ファイル移動まで全自動</div>
+    <div class="flow-step step-ai">2.【工程1→全自動】を押す → タグ生成 → 全サイトアップロード → ファイル移動まで全自動</div>
   </div>
-  <p>バリエーションリネームも行う場合は <strong>工程0</strong> を押してください。</p>
+  <p>バリエーションリネームも行う場合は <strong>【工程0→全自動】</strong> を押してください。個別ボタンで1工程ずつ実行することもできます。</p>
   <div class="alert-info alert">
-    起動時に素材フォルダの内容から <strong>API概算リクエスト数</strong> が自動表示されます。アップロード前には <strong>ファイルサイズ制限</strong>（Adobe 45MB / Pixta PNG 30MB / Shutterstock 50MB / Pixta 50枚）のバリデーションも自動実行されます。
+    モード行の右側に <strong>API概算リクエスト数</strong> が表示されます。アップロード前には <strong>ファイルサイズ制限</strong>（Adobe 45MB / Pixta PNG 30MB / Shutterstock 50MB / Pixta 50枚）のバリデーションも自動実行されます。
   </div>
 </section>
 
@@ -718,7 +730,8 @@ python pixta_login.py         # Pixta</code></pre>
 
     <ul style="margin-top: 12px">
       <li>テストモード時はファイル移動もスキップ → 同じ素材で繰り返しテスト可能</li>
-      <li>ブラウザを閉じると次のサイトの処理に自動的に進みます。ブラウザ待機中はポップアップで通知されます</li>
+      <li><strong>全自動ボタン:</strong> ブラウザを閉じずに次の工程へ自動で進み、全工程完了後にポップアップで通知</li>
+      <li><strong>個別ボタン:</strong> ブラウザを閉じると次の処理に進みます。ブラウザ待機中はポップアップで通知されます</li>
       <li>ブラウザ内でページ遷移（審査申請ページへ移動など）しても問題ありません</li>
       <li>各工程の完了時には処理時間が表示されます</li>
     </ul>
@@ -749,7 +762,8 @@ python pixta_login.py         # Pixta</code></pre>
     </div>
   </div>
   <div class="gui-callout">
-    <strong>ブラウザ待機中:</strong> 「ブラウザを開いたままにします」のログが出たらポップアップでも通知されます。ブラウザ上でタイトルやタグを確認・修正し、必要なら手動で審査申請してください。ブラウザを閉じると自動的に次のサイトへ進みます。
+    <strong>全自動ボタンの場合:</strong> 各サイトのブラウザが全て開いた状態で完了ポップアップが表示されます。各ブラウザでタイトル・タグを確認・修正し、手動で審査申請してください。<br>
+    <strong>個別ボタンの場合:</strong> 「ブラウザを閉じると次の処理に進みます」のログが出たらポップアップでも通知されます。ブラウザ上で確認・修正し、ブラウザを閉じると自動的に次へ進みます。
   </div>
 </section>
 
