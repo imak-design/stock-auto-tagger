@@ -447,13 +447,23 @@ li { margin-bottom: 6px; }
     <p style="margin-top:8px">バリエーションリネーム（工程0）も最適化されており、キーワードと各画像の色名を <strong>1回のAPIコール</strong> で取得します。</p>
   </div>
 
-  <h3>ボタン一覧</h3>
-  <p>上段の全自動ボタンは押すだけで最後まで一気通貫で実行します。下段の個別ボタンで1工程ずつ実行することもできます。</p>
+  <h3>全自動ボタン</h3>
+  <p>押すだけで最後まで一気通貫で実行します。</p>
   <div class="gui-mock" style="margin-bottom:20px">
     <div class="gui-btns">
       <span class="gui-btn btn-step0">⚡ 【工程0→全自動】リネーム → タグ → アップロード</span>
       <span class="gui-btn btn-step1">▶ 【工程1→全自動】タグ生成 → アップロード</span>
     </div>
+  </div>
+  <table>
+    <tr><th>ボタン</th><th>処理内容</th></tr>
+    <tr><td><strong>工程0→全自動</strong></td><td>リネーム → タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
+    <tr><td><strong>工程1→全自動</strong></td><td>タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
+  </table>
+
+  <h3>個別実行ボタン</h3>
+  <p>1工程ずつ実行したい場合に使います。</p>
+  <div class="gui-mock" style="margin-bottom:20px">
     <div class="gui-btns">
       <span class="gui-btn btn-step0" style="font-size:.75rem">⚡ 【工程0】リネーム</span>
       <span class="gui-btn btn-step1" style="font-size:.75rem">▶ 【工程1】タグ生成 & CSV出力</span>
@@ -466,10 +476,7 @@ li { margin-bottom: 6px; }
     </div>
   </div>
   <table>
-    <tr><th colspan="2" style="text-align:center;background:#1a4a5a">全自動ボタン</th></tr>
-    <tr><td><strong>工程0→全自動</strong></td><td>リネーム → タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
-    <tr><td><strong>工程1→全自動</strong></td><td>タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
-    <tr><th colspan="2" style="text-align:center;background:#0f3460">個別実行ボタン</th></tr>
+    <tr><th>ボタン</th><th>処理内容</th></tr>
     <tr><td><strong>工程0</strong></td><td>バリエーションリネームのみ</td></tr>
     <tr><td><strong>工程1</strong></td><td>Gemini バッチ解析 → CSV 生成 → メタデータ埋込のみ</td></tr>
     <tr><td><strong>工程2</strong></td><td>Adobe Stock 一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材はAIチェックON → 審査提出</td></tr>
