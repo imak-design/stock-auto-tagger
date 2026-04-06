@@ -426,7 +426,7 @@ li { margin-bottom: 6px; }
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-upload">工程3: Shutterstock 一括アップロード<br><span class="sub">全素材（通常+ベクター+写真）を一括アップロード → CSV適用 → 画像タブ・動画タブの順に提出（AI素材はSS非対応のため除外）</span></div>
     <div class="flow-arrow">↓</div>
-    <div class="flow-step step-upload">工程4: Pixta 3フェーズアップロード<br><span class="sub">A: イラスト+ベクター+AI画像（AIのみ選択的にAIチェック） → B: 動画+AI動画（工程1の結果を使い回し） → C: 写真</span></div>
+    <div class="flow-step step-upload">工程4: Pixta 3フェーズアップロード<br><span class="sub">1: イラスト+ベクター+AI画像（AIのみ選択的にAIチェック） → 2: 動画+AI動画（工程1の結果を使い回し） → 3: 写真</span></div>
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-file">工程5: ファイル移動<br><span class="sub">処理済みファイルをアーカイブへ</span></div>
   </div>
@@ -444,13 +444,25 @@ li { margin-bottom: 6px; }
 
   <h3>個別実行</h3>
   <p>各工程のボタンを個別に押して、必要な処理だけを実行することもできます。</p>
+  <div class="gui-mock" style="margin-bottom:20px">
+    <div class="gui-btns">
+      <span class="gui-btn btn-step0">⚡ 【工程0】リネーム → 全自動</span>
+      <span class="gui-btn btn-step1">▶ 【工程1】タグ生成 & CSV出力</span>
+    </div>
+    <div class="gui-btns">
+      <span class="gui-btn btn-adobe">☁ 【工程2】Adobe</span>
+      <span class="gui-btn btn-ss">☁ 【工程3】Shutterstock</span>
+      <span class="gui-btn btn-pixta">🌸 【工程4】Pixta</span>
+      <span class="gui-btn btn-move">📦 【工程5】ファイル移動</span>
+    </div>
+  </div>
   <table>
     <tr><th>ボタン</th><th>処理内容</th></tr>
     <tr><td><strong>工程0</strong></td><td>リネーム → 工程1〜5 を全自動実行</td></tr>
     <tr><td><strong>工程1</strong></td><td>Gemini バッチ解析 → CSV 生成 → メタデータ埋込 → 工程2〜5 を自動実行</td></tr>
     <tr><td><strong>工程2</strong></td><td>Adobe Stock 一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材はAIチェックON → 審査提出</td></tr>
     <tr><td><strong>工程3</strong></td><td>Shutterstock 一括アップロード → CSV適用 → 画像タブ・動画タブ順に提出</td></tr>
-    <tr><td><strong>工程4</strong></td><td>Pixta 3フェーズ（A: イラスト+ベクター+AI画像 → B: 動画+AI動画 → C: 写真） → 審査申請</td></tr>
+    <tr><td><strong>工程4</strong></td><td>Pixta 3フェーズ（1: イラスト+ベクター+AI画像 → 2: 動画+AI動画 → 3: 写真） → 審査申請</td></tr>
     <tr><td><strong>工程5</strong></td><td>処理済みファイルをアーカイブフォルダへ移動</td></tr>
   </table>
 </section>

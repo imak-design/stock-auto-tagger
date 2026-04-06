@@ -1205,6 +1205,8 @@ class StockTaggerApp:
             return
 
         self._disable_btn(self.adobe_btn)
+        if self.test_mode:
+            self._log("⚠ テストモードで実行中（審査申請はスキップされます）", "error")
         self._log("\n☁ Adobe Stock アップロード開始（ブラウザ直接アップロード）...", "info")
 
         def run():
@@ -1333,6 +1335,8 @@ class StockTaggerApp:
             return
 
         self._disable_btn(self.ss_btn)
+        if self.test_mode:
+            self._log("⚠ テストモードで実行中（審査申請はスキップされます）", "error")
         self._log(f"\n☁ Shutterstock ブラウザアップロード開始... ({len(all_targets)}件)", "info")
 
         def run():
@@ -1449,6 +1453,8 @@ class StockTaggerApp:
             return
 
         self._disable_btn(self.pixta_btn)
+        if self.test_mode:
+            self._log("⚠ テストモードで実行中（審査申請はスキップされます）", "error")
         self._log(
             f"\n🌸 Pixta アップロード開始（画像:{len(image_targets)}件 / 動画:{len(video_targets)}件 / Vector:{len(vector_results)}件）...",
             "info"
