@@ -231,7 +231,10 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
             # アップロ���ドボタンをクリック（ペンディングリストへ確定）
             log("Clicking upload confirm button...")
             submit_btn.wait_for(state="visible", timeout=5000)
-            submit_btn.click()
+            try:
+                submit_btn.click(timeout=60000)
+            except PWTimeout:
+                log("[!] Click navigation timeout - continuing (page may still be loading)")
             time.sleep(5)
             log(f"After upload-confirm URL: {page.url}")
 

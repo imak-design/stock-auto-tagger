@@ -1617,6 +1617,14 @@ def process_vector_files(input_folder: str, api_key: str, progress_callback=None
             if progress_callback:
                 progress_callback(f"  [NG] バッチエラー: {e}")
 
+    # Pixta用メタデータをEPSに埋め込み
+    if results:
+        if progress_callback:
+            progress_callback("[Vector] Pixta用メタデータをEPSに埋め込み中...")
+        embedded = embed_pixta_metadata(results, progress_callback)
+        if progress_callback:
+            progress_callback(f"  メタデータ埋め込み完了: {embedded}件")
+
     return {"success": len(results), "errors": errors, "results": results}
 
 
