@@ -14,6 +14,86 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
 from dotenv import load_dotenv
 
+class RoundedButton(tk.Canvas):
+    """Canvas描画による角丸ボタン"""
+    def __init__(self, parent, text="", command=None, bg="#e94560", fg="#ffffff",
+                 hover_bg=None, disabled_bg="#4a4a6a", disabled_fg="#888888",
+                 font=("BIZ UDゴシック", 10, "bold"), radius=14, padx=18, pady=9, **kwargs):
+        self._bg = bg
+        self._fg = fg
+        self._hover_bg = hover_bg or self._darken(bg, 0.8)
+        self._disabled_bg = disabled_bg
+        self._disabled_fg = disabled_fg
+        self._font = font
+        self._radius = radius
+        self._command = command
+        self._enabled = True
+        self._text = text
+
+        try:
+            parent_bg = parent.cget("background")
+        except Exception:
+            parent_bg = "#1a1a2e"
+
+        # テキストサイズを計測して幅・高さを決定
+        import tkinter.font as tkfont
+        _f = tkfont.Font(font=font)
+        tw = int(_f.measure(text))
+        th = int(_f.metrics("linespace"))
+        self._btn_w = int(tw + padx * 2)
+        self._btn_h = int(th + pady * 2)
+
+        super().__init__(parent, highlightthickness=0, borderwidth=0,
+                         bg=parent_bg, cursor="hand2",
+                         width=self._btn_w, height=self._btn_h, **kwargs)
+
+        self._draw(self._bg, self._fg)
+
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<ButtonPress-1>", self._on_click)
+
+    @staticmethod
+    def _darken(hex_color, factor):
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"#{int(r*factor):02x}{int(g*factor):02x}{int(b*factor):02x}"
+
+    def _round_rect(self, x1, y1, x2, y2, r, **kwargs):
+        points = [
+            x1+r, y1, x2-r, y1, x2, y1, x2, y1+r,
+            x2, y2-r, x2, y2, x2-r, y2, x1+r, y2,
+            x1, y2, x1, y2-r, x1, y1+r, x1, y1,
+        ]
+        return self.create_polygon(points, smooth=True, **kwargs)
+
+    def _draw(self, bg, fg):
+        self.delete("all")
+        self._round_rect(1, 1, self._btn_w-1, self._btn_h-1, self._radius, fill=bg, outline="")
+        self.create_text(self._btn_w/2, self._btn_h/2, text=self._text, font=self._font, fill=fg)
+
+    def _on_enter(self, _e):
+        if self._enabled:
+            self._draw(self._hover_bg, self._fg)
+
+    def _on_leave(self, _e):
+        if self._enabled:
+            self._draw(self._bg, self._fg)
+
+    def _on_click(self, _e):
+        if self._enabled and self._command:
+            self._command()
+
+    def state(self, flags):
+        if "disabled" in flags:
+            self._enabled = False
+            self.configure(cursor="")
+            self._draw(self._disabled_bg, self._disabled_fg)
+        elif "!disabled" in flags:
+            self._enabled = True
+            self.configure(cursor="hand2")
+            self._draw(self._bg, self._fg)
+
 ENV_DIR = Path.home() / ".stock-auto-tagger"
 ENV_FILE = ENV_DIR / ".env"
 load_dotenv(ENV_FILE)
@@ -153,66 +233,7 @@ class StockTaggerApp:
         style.map("Browse.TButton",
             background=[("active", "#1a4a80")])
 
-        # --- 工程ボタン用スタイル ---
-        style.configure("Step0.TButton",
-            background="#64ffda",
-            foreground="#0a0a1a",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat",
-            padding=(16, 8))
-        style.map("Step0.TButton",
-            background=[("active", "#4adbc0"), ("disabled", "#4a4a6a")],
-            foreground=[("disabled", "#888888")])
-
-        style.configure("Step1.TButton",
-            background="#e94560",
-            foreground="#ffffff",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat",
-            padding=(16, 8))
-        style.map("Step1.TButton",
-            background=[("active", "#c73652"), ("disabled", "#4a4a6a")],
-            foreground=[("disabled", "#888888")])
-
-        style.configure("Adobe.TButton",
-            background="#1a6fa8",
-            foreground="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat",
-            padding=(16, 8))
-        style.map("Adobe.TButton",
-            background=[("active", "#155a8a"), ("disabled", "#4a4a6a")],
-            foreground=[("disabled", "#888888")])
-
-        style.configure("SS.TButton",
-            background="#cc5500",
-            foreground="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat",
-            padding=(16, 8))
-        style.map("SS.TButton",
-            background=[("active", "#aa4400"), ("disabled", "#4a4a6a")],
-            foreground=[("disabled", "#888888")])
-
-        style.configure("Pixta.TButton",
-            background="#b5338a",
-            foreground="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat",
-            padding=(16, 8))
-        style.map("Pixta.TButton",
-            background=[("active", "#8f2870"), ("disabled", "#4a4a6a")],
-            foreground=[("disabled", "#888888")])
-
-        style.configure("Move.TButton",
-            background="#0f3460",
-            foreground="#e0e0e0",
-            font=("BIZ UDゴシック", 10, "bold"),
-            relief="flat",
-            padding=(16, 8))
-        style.map("Move.TButton",
-            background=[("active", "#1a4a80"), ("disabled", "#4a4a6a")],
-            foreground=[("disabled", "#888888")])
+        # 工程ボタンはRoundedButton（Canvas描画）を使用
 
         style.configure("TProgressbar",
             background="#e94560",
@@ -330,16 +351,14 @@ class StockTaggerApp:
         btn_auto = ttk.Frame(main, style="TFrame")
         btn_auto.pack(fill=tk.X, pady=(4, 4))
 
-        self.step0_auto_btn = ttk.Button(btn_auto,
+        self.step0_auto_btn = RoundedButton(btn_auto,
             text="⚡  【工程0→全自動】リネーム → タグ → アップロード",
-            style="Step0.TButton",
-            command=self._start_step0_auto)
+            bg="#64ffda", fg="#0a0a1a", command=self._start_step0_auto)
         self.step0_auto_btn.pack(side=tk.LEFT)
 
-        self.step1_auto_btn = ttk.Button(btn_auto,
+        self.step1_auto_btn = RoundedButton(btn_auto,
             text="▶  【工程1→全自動】タグ生成 → アップロード",
-            style="Step1.TButton",
-            command=self._start_step1_auto)
+            bg="#e94560", fg="#ffffff", command=self._start_step1_auto)
         self.step1_auto_btn.pack(side=tk.LEFT, padx=(12, 0))
 
         self.status_label = tk.Label(btn_auto,
@@ -352,44 +371,38 @@ class StockTaggerApp:
         btn_frame1 = ttk.Frame(main, style="TFrame")
         btn_frame1.pack(fill=tk.X, pady=(0, 4))
 
-        self.step0_btn = ttk.Button(btn_frame1,
+        self.step0_btn = RoundedButton(btn_frame1,
             text="⚡  【工程0】リネーム",
-            style="Step0.TButton",
-            command=self._start_step0)
+            bg="#64ffda", fg="#0a0a1a", command=self._start_step0)
         self.step0_btn.pack(side=tk.LEFT)
 
-        self.run_btn = ttk.Button(btn_frame1,
+        self.run_btn = RoundedButton(btn_frame1,
             text="▶  【工程1】タグ生成 & CSV出力",
-            style="Step1.TButton",
-            command=self._start_processing)
+            bg="#e94560", fg="#ffffff", command=self._start_processing)
         self.run_btn.pack(side=tk.LEFT, padx=(12, 0))
 
         # --- 個別実行ボタン (2行目) ---
         btn_frame2 = ttk.Frame(main, style="TFrame")
         btn_frame2.pack(fill=tk.X, pady=(0, 12))
 
-        self.adobe_btn = ttk.Button(btn_frame2,
+        self.adobe_btn = RoundedButton(btn_frame2,
             text="☁  【工程2】Adobe",
-            style="Adobe.TButton",
-            command=self._upload_adobe)
+            bg="#1a6fa8", fg="#e0e0e0", command=self._upload_adobe)
         self.adobe_btn.pack(side=tk.LEFT)
 
-        self.ss_btn = ttk.Button(btn_frame2,
+        self.ss_btn = RoundedButton(btn_frame2,
             text="☁  【工程3】Shutterstock",
-            style="SS.TButton",
-            command=self._upload_shutterstock)
+            bg="#cc5500", fg="#e0e0e0", command=self._upload_shutterstock)
         self.ss_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        self.pixta_btn = ttk.Button(btn_frame2,
+        self.pixta_btn = RoundedButton(btn_frame2,
             text="🌸  【工程4】Pixta",
-            style="Pixta.TButton",
-            command=self._upload_pixta)
+            bg="#b5338a", fg="#e0e0e0", command=self._upload_pixta)
         self.pixta_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        self.move_btn = ttk.Button(btn_frame2,
+        self.move_btn = RoundedButton(btn_frame2,
             text="📦  【工程5】ファイル移動",
-            style="Move.TButton",
-            command=self._move_files)
+            bg="#0f3460", fg="#e0e0e0", command=self._move_files)
         self.move_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         # プログレスバー
