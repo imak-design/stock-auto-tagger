@@ -279,7 +279,7 @@ def analyze_image(file_path: Path, api_key: str) -> dict:
     }
 
     text = call_gemini_api(api_key, payload)
-    return parse_json_response(text)
+    return _apply_pixta_sanitize(parse_json_response(text))
 
 
 BATCH_MAX = 10  # バッチ処理の最大枚数
@@ -477,7 +477,7 @@ def analyze_images_batch(file_paths: list, api_key: str, bg_prompt: str = "",
         if not isinstance(parsed, list):
             raise ValueError(f"バッチレスポンスが配列ではありません: {type(parsed)}")
 
-        return parsed
+        return _apply_pixta_sanitize(parsed)
 
     finally:
         # 5. アップロードファイルを一括削除
@@ -507,7 +507,7 @@ def analyze_video(file_path: Path, api_key: str, progress_callback=None, filenam
     finally:
         delete_gemini_file(file_name, api_key)
 
-    return parse_json_response(text)
+    return _apply_pixta_sanitize(parse_json_response(text))
 
 
 def parse_json_response(text: str) -> dict:
@@ -517,6 +517,46 @@ def parse_json_response(text: str) -> dict:
     elif "```" in text:
         text = text.split("```")[1].split("```")[0].strip()
     return json.loads(text)
+
+
+def sanitize_pixta_keywords(tags_str: str) -> str:
+    """PIXTA禁則文字を変換: 全角英数字→半角英数字, 半角カタカナ→全角カタカナ"""
+    import unicodedata
+    out = []
+    i = 0
+    while i < len(tags_str):
+        ch = tags_str[i]
+        code = ord(ch)
+        # 全角数字0-9, 大文字A-Z, 小文字a-z → 半角
+        if (0xFF10 <= code <= 0xFF19 or
+            0xFF21 <= code <= 0xFF3A or
+            0xFF41 <= code <= 0xFF5A):
+            out.append(chr(code - 0xFEE0))
+            i += 1
+        # 半角カタカナ（濁点・半濁点結合対応）→ 全角カタカナ
+        elif 0xFF61 <= code <= 0xFF9F:
+            if i + 1 < len(tags_str) and ord(tags_str[i+1]) in (0xFF9E, 0xFF9F):
+                chunk = tags_str[i:i+2]
+                i += 2
+            else:
+                chunk = ch
+                i += 1
+            out.append(unicodedata.normalize("NFKC", chunk))
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _apply_pixta_sanitize(meta):
+    """metadataのpixta_keywords_jaをサニタイズ（dictまたはlist対応）"""
+    if isinstance(meta, dict) and "pixta_keywords_ja" in meta:
+        meta["pixta_keywords_ja"] = sanitize_pixta_keywords(meta.get("pixta_keywords_ja", ""))
+    elif isinstance(meta, list):
+        for m in meta:
+            if isinstance(m, dict) and "pixta_keywords_ja" in m:
+                m["pixta_keywords_ja"] = sanitize_pixta_keywords(m.get("pixta_keywords_ja", ""))
+    return meta
 
 # ============================================================
 # CSV出力
