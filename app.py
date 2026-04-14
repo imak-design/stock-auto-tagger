@@ -139,7 +139,18 @@ class StockTaggerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Stock Media Auto Tagger")
-        self.root.geometry("860x680")
+
+        # 画面サイズに応じてウィンドウサイズを動的に決定
+        # メニューバー(Mac)・タスクバー(Win)・Dock分のマージンとして -120
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        w = min(860, max(640, sw - 40))
+        h = min(680, max(480, sh - 120))
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 2 - 20)
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+        self.root.minsize(640, 480)
+
         self.root.resizable(True, True)
         self.root.configure(bg="#1a1a2e")
 
@@ -158,7 +169,7 @@ class StockTaggerApp:
         self.adobe_enabled = tk.BooleanVar(value="adobe" in enabled)
         self.ss_enabled = tk.BooleanVar(value="shutterstock" in enabled)
         self.pixta_enabled = tk.BooleanVar(value="pixta" in enabled)
-        self.test_mode = bool(self.config.get("test_mode", False))
+        self.test_mode = bool(self.config.get("test_mode", True))
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -243,9 +254,39 @@ class StockTaggerApp:
             darkcolor="#e94560")
 
     def _build_ui(self):
-        # メインフレーム
-        main = ttk.Frame(self.root, style="TFrame", padding=24)
-        main.pack(fill=tk.BOTH, expand=True)
+        # スクロール可能なメインエリア（コンテンツが画面より大きいMacでもスクロールで全部見える）
+        outer = tk.Frame(self.root, bg="#1a1a2e")
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(outer, bg="#1a1a2e", highlightthickness=0)
+        vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        main = ttk.Frame(canvas, style="TFrame", padding=24)
+        main_window = canvas.create_window((0, 0), window=main, anchor="nw")
+
+        # mainのサイズ変更をscrollregionに反映
+        def _on_frame_configure(_e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        main.bind("<Configure>", _on_frame_configure)
+
+        # canvas幅変更時にmainの幅も合わせる（横スクロール防止）
+        def _on_canvas_configure(e):
+            canvas.itemconfig(main_window, width=e.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        # マウスホイールでスクロール（Windows/Mac両対応）
+        def _on_mousewheel(e):
+            if abs(e.delta) >= 120:
+                canvas.yview_scroll(int(-e.delta / 120), "units")
+            else:
+                canvas.yview_scroll(int(-e.delta), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Linuxの場合（Button-4/5）
+        canvas.bind_all("<Button-4>", lambda _e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda _e: canvas.yview_scroll(1, "units"))
 
         # タイトル
         title_frame = ttk.Frame(main, style="TFrame")
