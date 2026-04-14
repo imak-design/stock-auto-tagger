@@ -42,9 +42,19 @@ brew install python
 [python.org](https://www.python.org/downloads/) からインストーラーをダウンロード。
 インストール時に **「Add Python to PATH」にチェック** を入れてください。
 
-### 2. Git のインストール（Windows のみ）
+### 2. Git のインストール
 
-Windows には Git が入っていないため、別途インストールが必要です（Mac は初回に自動インストールされます）。
+#### Mac
+ターミナルで以下を実行すると、Xcode Command Line Tools と一緒に Git が自動インストールされます：
+```bash
+git --version
+```
+初回実行時にインストール確認ダイアログが表示されるので「インストール」をクリックしてください。
+
+> **Claude Code を使う場合**: Claude Code（AI アシスタント）でこのツールをカスタマイズするには Git のインストールが必須です。
+
+#### Windows
+Windows には Git が入っていないため、別途インストールが必要です。
 
 [git-scm.com](https://git-scm.com/downloads/win) からインストーラーをダウンロードし、デフォルト設定のままインストールしてください。
 
