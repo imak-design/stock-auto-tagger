@@ -186,18 +186,21 @@ python pixta_login.py         # Pixta
 
 ### 7. アプリ起動
 
-**Windows**: `起動する.bat` をダブルクリック、または：
-```bash
-python app.py
-```
+**Mac**: `create_app.command` をダブルクリックすると、デスクトップに **StockAutoTagger.app** が作成されます（初回のみ）。以降は `.app` をダブルクリックまたは Dock にドラッグして起動できます。
 
-**Mac**: 初回のみ、ターミナルで実行権限を付与してください：
+> `fileicon`（`brew install fileicon`）が未インストールの場合、セットアップ時に自動でインストールされます。
+
+または `起動.command` をダブルクリック（初回のみターミナルで `chmod +x 起動.command` を実行）。
+
+**Windows**: `起動する.bat` をダブルクリック。
+
+どちらの OS でもターミナルから直接起動できます：
 ```bash
-chmod +x ~/Desktop/stock-auto-tagger/起動.command
-```
-その後 `起動.command` をダブルクリック、または：
-```bash
+# Mac
 source venv/bin/activate
+python app.py
+
+# Windows
 python app.py
 ```
 
