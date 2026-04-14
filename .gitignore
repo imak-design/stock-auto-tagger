@@ -23,6 +23,9 @@ venv/
 Thumbs.db
 desktop.ini
 
+# Generated shortcut (created by windows/アプリ化.bat)
+StockAutoTagger.lnk
+
 # IDE
 .vscode/
 .idea/

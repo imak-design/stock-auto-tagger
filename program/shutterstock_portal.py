@@ -11,8 +11,7 @@ import re
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-
-SESSION_FILE = Path(__file__).parent / "shutterstock_session.json"
+from paths import SHUTTERSTOCK_SESSION as SESSION_FILE
 PHOTO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/photo"
 VIDEO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/video"
 

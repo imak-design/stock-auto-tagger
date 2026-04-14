@@ -11,8 +11,7 @@ import csv
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-
-SESSION_FILE = Path(__file__).parent / "adobe_session.json"
+from paths import ADOBE_SESSION as SESSION_FILE, ADOBE_PROFILE
 UPLOADS_URL = "https://contributor.stock.adobe.com/jp/uploads?upload=1"
 
 def _convert_csv_categories(src_path: Path) -> Path:
@@ -98,9 +97,8 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 context.close()
                 browser.close()
 
-                USER_DATA_DIR = Path(__file__).parent / "chrome_profile"
                 relogin_ctx = p.chromium.launch_persistent_context(
-                    user_data_dir=str(USER_DATA_DIR),
+                    user_data_dir=str(ADOBE_PROFILE),
                     headless=False,
                     channel="chrome",
                     args=["--disable-blink-features=AutomationControlled"],

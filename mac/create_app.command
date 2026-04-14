@@ -1,9 +1,9 @@
 #!/bin/zsh
 # StockAutoTagger.app をデスクトップに作成するセットアップスクリプト
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 PROJECT_DIR="$(pwd)"
 APP_PATH="$HOME/Desktop/StockAutoTagger.app"
-ICON_PNG="$PROJECT_DIR/icon.png"
+ICON_PNG="$PROJECT_DIR/program/icon.png"
 
 echo "=== StockAutoTagger アプリを作成します ==="
 echo "プロジェクト: $PROJECT_DIR"
@@ -23,7 +23,7 @@ fi
 
 # AppleScript で .app を生成
 osacompile -e "
-do shell script \"cd '$PROJECT_DIR' && ./venv/bin/python app.py &> /dev/null &\"
+do shell script \"cd '$PROJECT_DIR' && ./venv/bin/python program/app.py &> /dev/null &\"
 " -o "$APP_PATH"
 
 # アイコンを設定

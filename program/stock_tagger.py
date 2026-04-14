@@ -69,7 +69,7 @@ ADOBE_TO_SHUTTERSTOCK = {
 # 設定ファイル読み込み
 # ============================================================
 
-CONFIG_FILE = Path(__file__).parent / "config.json"
+from paths import CONFIG_FILE
 
 def load_config() -> dict:
     if CONFIG_FILE.exists():

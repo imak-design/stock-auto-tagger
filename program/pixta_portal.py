@@ -9,8 +9,7 @@ Pixta イラストアップロード自動化
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-
-SESSION_FILE = Path(__file__).parent / "pixta_session.json"
+from paths import PIXTA_SESSION as SESSION_FILE
 UPLOAD_URL = "https://pixta.jp/mypage/upload/illustration#per_page=100&sort=4"
 UPLOAD_URL_PHOTO = "https://pixta.jp/mypage/upload/photo#per_page=100&sort=4"
 

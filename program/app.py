@@ -94,12 +94,12 @@ class RoundedButton(tk.Canvas):
             self.configure(cursor="hand2")
             self._draw(self._bg, self._fg)
 
-ENV_DIR = Path.home() / ".stock-auto-tagger"
-ENV_FILE = ENV_DIR / ".env"
+# 共通パス（ホームディレクトリ配下に機密情報を集約 + 旧パスからの自動マイグレーション）
+sys.path.insert(0, str(Path(__file__).parent))
+from paths import ENV_DIR, ENV_FILE, CONFIG_FILE
 load_dotenv(ENV_FILE)
 
 # メイン処理をインポート
-sys.path.insert(0, str(Path(__file__).parent))
 from stock_tagger import (
     process_folder, move_processed_files, rename_variation_folders,
     upload_to_shutterstock, get_upload_targets,
@@ -109,8 +109,6 @@ from stock_tagger import (
     write_adobe_stock_csv, write_shutterstock_csv,
 )
 from adobe_portal import run_portal_automation
-
-CONFIG_FILE = Path(__file__).parent / "config.json"
 
 # ============================================================
 # 設定の読み書き
@@ -745,23 +743,6 @@ class StockTaggerApp:
         else:
             self._do_start_processing(folder, api_key, auto_continue=False)
 
-    def _login_then_run(self, name: str, mod_name: str, continuation):
-        """セッションがない場合にログインを促し、完了後にcontinuationを実行する。"""
-        if not messagebox.askyesno("ログインが必要です", f"{name} にログインしていません。\n今すぐブラウザでログインしますか？"):
-            return
-        import importlib
-        mod = importlib.import_module(mod_name)
-        done_event = threading.Event()
-        def show_dialog(ev=done_event, n=name):
-            messagebox.showinfo(f"{n} ログイン", f"ブラウザで{n}にログインしてください。\nログインが完了したらOKを押してください。")
-            ev.set()
-        def run_login():
-            mod._confirm_callback = lambda ev=done_event: (self.root.after(0, show_dialog), ev.wait())
-            mod.save_session()
-            mod._confirm_callback = None
-            self.root.after(0, continuation)
-        threading.Thread(target=run_login, daemon=True).start()
-
     def _ensure_sessions_then_start(self, folder: str, api_key: str, auto_continue: bool = False):
         from adobe_portal import SESSION_FILE as ADOBE_SESSION
         from shutterstock_portal import SESSION_FILE as SS_SESSION
@@ -769,52 +750,21 @@ class StockTaggerApp:
 
         enabled_sites = self._get_enabled_sites()
         login_map = [
-            ("Adobe Stock", ADOBE_SESSION, "adobe_login", "adobe"),
-            ("Shutterstock", SS_SESSION, "shutterstock_login", "shutterstock"),
-            ("Pixta", PIXTA_SESSION, "pixta_login", "pixta"),
+            ("Adobe Stock", ADOBE_SESSION, "adobe_login.py", "adobe"),
+            ("Shutterstock", SS_SESSION, "shutterstock_login.py", "shutterstock"),
+            ("Pixta", PIXTA_SESSION, "pixta_login.py", "pixta"),
         ]
-        missing = [(name, mod) for name, sf, mod, site in login_map if site in enabled_sites and not sf.exists()]
+        missing = [(name, script) for name, sf, script, site in login_map if site in enabled_sites and not sf.exists()]
 
         if missing:
-            names = "\n".join(f"• {name}" for name, _ in missing)
-            if not messagebox.askyesno(
-                "ログインが必要です",
-                f"以下のサイトにログインしていません:\n{names}\n\n今すぐブラウザでログインしますか？"
-            ):
-                return
+            lines = "\n".join(f"• {name}: python {script}" for name, script in missing)
+            messagebox.showerror(
+                "ログインセッションがありません",
+                f"以下のサイトのセッションが未保存です。\nコマンドプロンプトで以下を実行してから再起動してください:\n\n{lines}"
+            )
+            return
 
-            self._save_settings()
-            self.is_running = True
-            self._disable_all_btns()
-            self._log("\n" + "─" * 50, "dim")
-            self._log("ログイン処理を開始します...", "info")
-
-            def run_logins():
-                import importlib
-                for name, mod_name in missing:
-                    self.root.after(0, lambda n=name: self._log(f"🔐 {n} のブラウザを開きます。ログインしてください...", "info"))
-                    mod = importlib.import_module(mod_name)
-
-                    done_event = threading.Event()
-                    def show_dialog(ev=done_event, n=name):
-                        messagebox.showinfo(
-                            f"{n} ログイン",
-                            f"ブラウザで{n}にログインしてください。\nログインが完了したらOKを押してください。"
-                        )
-                        ev.set()
-                    mod._confirm_callback = lambda ev=done_event: (
-                        self.root.after(0, show_dialog),
-                        ev.wait()
-                    )
-                    mod.save_session()
-                    mod._confirm_callback = None
-
-                    self.root.after(0, lambda n=name: self._log(f"[OK] {n} ログイン完了", "info"))
-                self.root.after(0, lambda: self._do_start_processing(folder, api_key, already_started=True, auto_continue=auto_continue))
-
-            threading.Thread(target=run_logins, daemon=True).start()
-        else:
-            self._do_start_processing(folder, api_key, auto_continue=auto_continue)
+        self._do_start_processing(folder, api_key, auto_continue=auto_continue)
 
     def _do_start_processing(self, folder: str, api_key: str, already_started: bool = False, auto_continue: bool = False):
         if not already_started:
@@ -1271,7 +1221,10 @@ class StockTaggerApp:
             return
 
         if not SESSION_FILE.exists():
-            self._login_then_run("Adobe Stock", "adobe_login", self._upload_adobe)
+            messagebox.showerror(
+                "セッション未保存",
+                "Adobe Stock のログインセッションがありません。\nコマンドプロンプトで以下を実行してから再起動してください:\n\npython adobe_login.py"
+            )
             return
 
         folder_path = _Path(folder)
@@ -1394,7 +1347,10 @@ class StockTaggerApp:
             return
 
         if not SS_SESSION.exists():
-            self._login_then_run("Shutterstock", "shutterstock_login", self._upload_shutterstock)
+            messagebox.showerror(
+                "セッション未保存",
+                "Shutterstock のログインセッションがありません。\nコマンドプロンプトで以下を実行してから再起動してください:\n\npython shutterstock_login.py"
+            )
             return
 
         from pathlib import Path as _Path
@@ -1509,7 +1465,10 @@ class StockTaggerApp:
             return
 
         if not PIXTA_SESSION.exists():
-            self._login_then_run("Pixta", "pixta_login", self._upload_pixta)
+            messagebox.showerror(
+                "セッション未保存",
+                "Pixta のログインセッションがありません。\nコマンドプロンプトで以下を実行してから再起動してください:\n\npython pixta_login.py"
+            )
             return
 
         api_key = self.api_key_var.get().strip()
@@ -1829,7 +1788,34 @@ class StockTaggerApp:
 # 起動
 # ============================================================
 
+def _check_sessions_or_exit():
+    """有効サイトのセッションファイルを確認。未保存があれば警告して終了。"""
+    from adobe_portal import SESSION_FILE as ADOBE_SESSION
+    from shutterstock_portal import SESSION_FILE as SS_SESSION
+    from pixta_portal import SESSION_FILE as PIXTA_SESSION
+
+    config = load_config()
+    enabled_sites = config.get("enabled_sites", ["adobe", "shutterstock", "pixta"])
+    login_map = [
+        ("Adobe Stock", ADOBE_SESSION, "adobe_login.py", "adobe"),
+        ("Shutterstock", SS_SESSION, "shutterstock_login.py", "shutterstock"),
+        ("Pixta", PIXTA_SESSION, "pixta_login.py", "pixta"),
+    ]
+    missing = [(name, script) for name, sf, script, site in login_map if site in enabled_sites and not sf.exists()]
+    if missing:
+        lines = "\n".join(f"• {name}: python {script}" for name, script in missing)
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "ログインセッションがありません",
+            f"以下のサイトのセッションが未保存です。\nコマンドプロンプトで以下を実行してからアプリを起動してください:\n\n{lines}"
+        )
+        root.destroy()
+        sys.exit(1)
+
+
 def main():
+    _check_sessions_or_exit()
     root = tk.Tk()
     app = StockTaggerApp(root)
     root.mainloop()

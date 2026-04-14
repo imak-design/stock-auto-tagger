@@ -6,10 +6,7 @@ Shutterstock コントリビューターポータル ログイン & セッショ
 """
 
 from playwright.sync_api import sync_playwright
-from pathlib import Path
-
-SESSION_FILE = Path(__file__).parent / "shutterstock_session.json"
-USER_DATA_DIR = Path(__file__).parent / "shutterstock_profile"
+from paths import SHUTTERSTOCK_SESSION as SESSION_FILE, SHUTTERSTOCK_PROFILE as USER_DATA_DIR
 
 PORTAL_URL = "https://submit.shutterstock.com/"
 
@@ -30,16 +27,27 @@ def save_session():
 
         print("Shutterstockコントリビューターポータルを開きます...")
         print("ブラウザでShutterstockアカウントにログインしてください。")
-        page.goto(PORTAL_URL)
+        page.goto(PORTAL_URL, wait_until="commit")
 
-        input("\nログインが完了したら、ここでEnterキーを押してください...")
+        cb = globals().get("_confirm_callback")
+        if cb:
+            cb()
+        else:
+            input("\nログインが完了したら、ここでEnterキーを押してください...")
 
-        # セッション保存
-        context.storage_state(path=str(SESSION_FILE))
-        print(f"セッションを保存しました: {SESSION_FILE}")
-
-        # ブラウザを閉じる
-        context.close()
+        try:
+            context.storage_state(path=str(SESSION_FILE))
+            print(f"セッションを保存しました: {SESSION_FILE}")
+        except Exception as e:
+            raise RuntimeError(
+                "ブラウザが閉じられたため、セッションを保存できませんでした。"
+                "ブラウザを閉じずに、ログイン完了後にダイアログのOKを押してください。"
+            ) from e
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     save_session()
