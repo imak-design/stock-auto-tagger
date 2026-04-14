@@ -726,12 +726,13 @@ class StockTaggerApp:
         from shutterstock_portal import SESSION_FILE as SS_SESSION
         from pixta_portal import SESSION_FILE as PIXTA_SESSION
 
+        enabled_sites = self._get_enabled_sites()
         login_map = [
-            ("Adobe Stock", ADOBE_SESSION, "adobe_login"),
-            ("Shutterstock", SS_SESSION, "shutterstock_login"),
-            ("Pixta", PIXTA_SESSION, "pixta_login"),
+            ("Adobe Stock", ADOBE_SESSION, "adobe_login", "adobe"),
+            ("Shutterstock", SS_SESSION, "shutterstock_login", "shutterstock"),
+            ("Pixta", PIXTA_SESSION, "pixta_login", "pixta"),
         ]
-        missing = [(name, mod) for name, sf, mod in login_map if not sf.exists()]
+        missing = [(name, mod) for name, sf, mod, site in login_map if site in enabled_sites and not sf.exists()]
 
         if missing:
             names = "\n".join(f"• {name}" for name, _ in missing)
