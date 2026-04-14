@@ -1453,16 +1453,17 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
         progress_callback(f"  Adobe統合CSV: {len(all_adobe_results)}件（通常{len(results)} / 写真{len(photo_results)} / AI{len(ai_results)}）")
         progress_callback(f"  SS統合CSV: {len(all_ss_results)}件（通常{len(results)} / 写真{len(photo_results)}）")
 
-    # Pixta用メタデータ埋め込み（通常 + 写真 + AI全部）
-    all_results = results + photo_results + ai_results
+    # Pixta用メタデータ埋め込み（通常 + 写真のみ、AI除外：PIXTA AI素材受付停止）
+    pixta_results = results + photo_results
     if progress_callback:
         progress_callback("Pixta用メタデータを画像に埋め込み中...")
-    embedded = embed_pixta_metadata(all_results, progress_callback)
+    embedded = embed_pixta_metadata(pixta_results, progress_callback)
     if progress_callback:
         progress_callback(f"  メタデータ埋め込み完了: {embedded}件")
+        progress_callback(f"  Pixta: {len(pixta_results)}件（通常{len(results)} / 写真{len(photo_results)}）※AI素材はPIXTA受付停止のため除外")
 
-    # 動画メタデータをJSONに保存（工程4で使い回すため）
-    video_meta_list = [r for r in all_results if r.get("file_type") == "video"]
+    # 動画メタデータをJSONに保存（工程4で使い回すため、AI除外）
+    video_meta_list = [r for r in pixta_results if r.get("file_type") == "video"]
     if video_meta_list:
         video_meta_path = csv_folder / "video_metadata.json"
         with open(video_meta_path, "w", encoding="utf-8") as f:

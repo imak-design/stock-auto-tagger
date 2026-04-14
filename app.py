@@ -1048,10 +1048,7 @@ class StockTaggerApp:
             pixta_images = [f for f in all_pixta if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
             pixta_videos = [f for f in all_pixta if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
 
-            ai_files_all = get_ai_files(folder_path)
-            ai_images = [f for f in ai_files_all if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-            ai_videos = [f for f in ai_files_all if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
-
+            # AI素材はPIXTA受付停止のため除外
             photo_files_all = get_photo_files(folder_path)
             photo_images = [f for f in photo_files_all if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
 
@@ -1065,9 +1062,8 @@ class StockTaggerApp:
                     log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
                     failed_services.append("Pixta Vector")
 
-            # ---- 工程A: イラストページ（通常画像 + ベクターZIP + AI画像）----
-            illust_files = pixta_images + vector_zips + ai_images
-            ai_image_names = {f.name for f in ai_images} if ai_images else None
+            # ---- 工程A: イラストページ（通常画像 + ベクターZIP）----
+            illust_files = pixta_images + vector_zips
 
             if illust_files:
                 try:
@@ -1078,14 +1074,11 @@ class StockTaggerApp:
                         details.append(f"通常{len(pixta_images)}")
                     if vector_zips:
                         details.append(f"ベクター{len(vector_zips)}")
-                    if ai_images:
-                        details.append(f"AI{len(ai_images)}")
                     log(f"  内訳: {' / '.join(details)}")
                     pixta_result = pixta_upload(
                         files=illust_files,
                         progress_callback=log,
                         skip_submit=self.test_mode,
-                        ai_filenames=ai_image_names,
                         no_wait=self.test_mode,
                         playwright_instance=_pw,
                     )
@@ -1097,15 +1090,13 @@ class StockTaggerApp:
             else:
                 log("[!] Pixtaイラストアップロード対象がありません。スキップします。")
 
-            # ---- 工程B: 動画（通常動画 + AI動画）----
-            all_videos = pixta_videos + ai_videos
+            # ---- 工程B: 動画（通常動画のみ、AI除外）----
+            all_videos = pixta_videos
             video_targets = all_videos  # ファイル移動用
             if all_videos:
                 try:
                     log("\n" + "─" * 40)
                     log(f"🎬 Pixta 動画一括アップロード開始: {len(all_videos)}件...")
-                    if ai_videos:
-                        log(f"  内訳: 通常{len(pixta_videos)} / AI{len(ai_videos)}")
 
                     saved_video_meta = self._get_saved_video_metadata(folder)
                     video_metadata = []
@@ -1125,13 +1116,11 @@ class StockTaggerApp:
                             log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
                         video_metadata.append({"title": title, "tags": tags})
 
-                    ai_video_names = {f.name for f in ai_videos} if ai_videos else None
                     footage_result = run_footage_upload(
                         files=all_videos,
                         metadata=video_metadata,
                         progress_callback=log,
                         skip_submit=self.test_mode,
-                        ai_filenames=ai_video_names,
                         no_wait=self.test_mode,
                         playwright_instance=_pw,
                     )
@@ -1471,7 +1460,7 @@ class StockTaggerApp:
         from pixta_portal import run_upload_and_submit as pixta_upload, SESSION_FILE as PIXTA_SESSION
         from pixta_footage_portal import run_footage_upload
         from pathlib import Path as _Path
-        from stock_tagger import get_upload_targets, get_ai_files as _get_ai_files, analyze_video, UPLOAD_VIDEO_EXTENSIONS
+        from stock_tagger import get_upload_targets, analyze_video, UPLOAD_VIDEO_EXTENSIONS
 
         folder = self.folder_var.get().strip()
         if not folder:
@@ -1487,7 +1476,7 @@ class StockTaggerApp:
         api_key = self.api_key_var.get().strip()
         folder_path = _Path(folder)
         all_targets = get_upload_targets(folder_path, "pixta")
-        ai_files = _get_ai_files(folder_path)
+        # AI素材はPIXTA受付停止のため除外
         from stock_tagger import get_photo_files as _get_photo_files
         photo_files = _get_photo_files(folder_path)
         image_targets = [f for f in all_targets if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
@@ -1506,20 +1495,18 @@ class StockTaggerApp:
                 except Exception:
                     pass
 
-        if not all_targets and not ai_files and not photo_files and not vector_results:
+        if not all_targets and not photo_files and not vector_results:
             messagebox.showinfo("確認", "Pixtaアップロード対象のファイルが見つかりません。")
             return
 
         # --- 開始前確認ダイアログ ---
-        confirm_targets = list(all_targets) + photo_files + ai_files
+        confirm_targets = list(all_targets) + photo_files
         file_list = "\n".join(f"  {f.name}" for f in confirm_targets[:10])
         if len(confirm_targets) > 10:
             file_list += f"\n  ...他{len(confirm_targets) - 10}件"
         extra_notes = []
         if photo_files:
             extra_notes.append(f"写真: {len(photo_files)}件")
-        if ai_files:
-            extra_notes.append(f"AI: {len(ai_files)}件")
         if video_targets:
             extra_notes.append(f"動画: {len(video_targets)}件")
         if vector_results:
@@ -1544,9 +1531,7 @@ class StockTaggerApp:
             _step_start = _time.time()
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
             try:
-                # ファイル収集
-                ai_images = [f for f in ai_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
-                ai_videos = [f for f in ai_files if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
+                # ファイル収集（AI素材はPIXTA受付停止のため除外）
                 photo_img = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
 
                 # ベクターZIP
@@ -1557,9 +1542,8 @@ class StockTaggerApp:
                     except Exception as e:
                         log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
 
-                # ---- 工程A: イラストページ（通常画像 + ベクターZIP + AI画像）----
-                illust_files = image_targets + vector_zips + ai_images
-                ai_image_names = {f.name for f in ai_images} if ai_images else None
+                # ---- 工程A: イラストページ（通常画像 + ベクターZIP）----
+                illust_files = image_targets + vector_zips
 
                 if illust_files:
                     log("\n" + "─" * 40)
@@ -1569,26 +1553,21 @@ class StockTaggerApp:
                         details.append(f"通常{len(image_targets)}")
                     if vector_zips:
                         details.append(f"ベクター{len(vector_zips)}")
-                    if ai_images:
-                        details.append(f"AI{len(ai_images)}")
                     log(f"  内訳: {' / '.join(details)}")
                     illust_result = pixta_upload(
                         files=illust_files,
                         progress_callback=log,
                         skip_submit=self.test_mode,
-                        ai_filenames=ai_image_names,
                     )
                     log(f"[OK] Pixtaイラスト完了: アップロード{illust_result['uploaded']}件 / 審査申請{illust_result['submitted']}件")
                 else:
                     log("[!] Pixtaイラストアップロード対象がありません。スキップします。")
 
-                # ---- 工程B: 動画（通常動画 + AI動画）----
-                all_videos = video_targets + ai_videos
+                # ---- 工程B: 動画（通常動画のみ、AI除外）----
+                all_videos = video_targets
                 if all_videos:
                     log("\n" + "─" * 40)
                     log(f"🎬 Pixta 動画一括アップロード開始: {len(all_videos)}件...")
-                    if ai_videos:
-                        log(f"  内訳: 通常{len(video_targets)} / AI{len(ai_videos)}")
 
                     saved_video_meta = self._get_saved_video_metadata(folder)
                     video_metadata = []
@@ -1608,13 +1587,11 @@ class StockTaggerApp:
                             log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
                         video_metadata.append({"title": title, "tags": tags})
 
-                    ai_video_names = {f.name for f in ai_videos} if ai_videos else None
                     footage_result = run_footage_upload(
                         files=all_videos,
                         metadata=video_metadata,
                         progress_callback=log,
                         skip_submit=self.test_mode,
-                        ai_filenames=ai_video_names,
                     )
                     log(f"[OK] Pixta動画完了: アップロード{footage_result['uploaded']}件 / 審査申請{footage_result['submitted']}件")
 

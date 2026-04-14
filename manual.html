@@ -430,7 +430,7 @@ li { margin-bottom: 6px; }
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-upload">工程3: Shutterstock 一括アップロード<br><span class="sub">全素材（通常+ベクター+写真）を一括アップロード → CSV適用 → 画像タブ・動画タブの順に提出（AI素材はSS非対応のため除外）</span></div>
     <div class="flow-arrow">↓</div>
-    <div class="flow-step step-upload">工程4: Pixta 3フェーズアップロード<br><span class="sub">1: イラスト+ベクター+AI画像（AIのみ選択的にAIチェック） → 2: 動画+AI動画（工程1の結果を使い回し） → 3: 写真</span></div>
+    <div class="flow-step step-upload">工程4: Pixta 3フェーズアップロード<br><span class="sub">1: イラスト+ベクター → 2: 動画（工程1の結果を使い回し） → 3: 写真（AI素材はPIXTA受付停止のため除外）</span></div>
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-file">工程5: ファイル移動<br><span class="sub">処理済みファイルをアーカイブへ</span></div>
   </div>
@@ -481,7 +481,7 @@ li { margin-bottom: 6px; }
     <tr><td><strong>工程1</strong></td><td>Gemini バッチ解析 → CSV 生成 → メタデータ埋込のみ</td></tr>
     <tr><td><strong>工程2</strong></td><td>Adobe Stock 一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材はAIチェックON → 審査提出</td></tr>
     <tr><td><strong>工程3</strong></td><td>Shutterstock 一括アップロード → CSV適用 → 画像タブ・動画タブ順に提出</td></tr>
-    <tr><td><strong>工程4</strong></td><td>Pixta 3フェーズ（1: イラスト+ベクター+AI画像 → 2: 動画+AI動画 → 3: 写真） → 審査申請</td></tr>
+    <tr><td><strong>工程4</strong></td><td>Pixta 3フェーズ（1: イラスト+ベクター → 2: 動画 → 3: 写真） → 審査申請（AI素材は除外）</td></tr>
     <tr><td><strong>工程5</strong></td><td>処理済みファイルをアーカイブフォルダへ移動</td></tr>
   </table>
 </section>
@@ -576,7 +576,7 @@ playwright install chromium</code></pre>
   <p><code>input_folder</code> に設定したフォルダの中に、素材の種類に応じてサブフォルダを作成してください。<strong>サブフォルダがない場合、すべて通常のイラストとして処理されます。</strong></p>
   <table>
     <tr><th>サブフォルダ</th><th>用途</th><th>必要な人</th></tr>
-    <tr><td><code>AI/</code></td><td>AI生成画像</td><td>AI で生成した画像は必ずここに入れてください（Adobe・Pixta で AI生成の申告が自動設定されます）</td></tr>
+    <tr><td><code>AI/</code></td><td>AI生成画像</td><td>AI で生成した画像は必ずここに入れてください（Adobe で AI生成の申告が自動設定されます。Shutterstock・Pixta は AI 素材受付停止のため除外されます）</td></tr>
     <tr><td><code>Photo/</code></td><td>写真素材</td><td>Adobe で写真カテゴリ、Pixta で写真ページにアップしたい人</td></tr>
     <tr><td><code>Vector/</code></td><td>ベクター素材（EPS + PNG）</td><td>EPS ファイルをアップロードする人</td></tr>
   </table>
@@ -708,9 +708,9 @@ python pixta_login.py         # Pixta</code></pre>
     <tr><th>フォルダ</th><th>Adobe Stock</th><th>Shutterstock</th><th>Pixta</th></tr>
     <tr><td>通常（直下）</td><td class="center">イラスト</td><td class="center">通常</td><td class="center">イラストページ</td></tr>
     <tr><td><code>Photo/</code></td><td class="center">写真カテゴリ</td><td class="center">通常</td><td class="center">写真ページ</td></tr>
-    <tr><td><code>AI/</code></td><td class="center">イラスト + AI チェック</td><td class="center">対象外</td><td class="center">イラスト + AI チェック</td></tr>
+    <tr><td><code>AI/</code></td><td class="center">イラスト + AI チェック</td><td class="center">対象外</td><td class="center">対象外</td></tr>
   </table>
-  <p class="sub">フォルダがなければ全ファイルが通常素材として処理されます。Shutterstock は AI 作品登録不可のため AI フォルダは除外されます。</p>
+  <p class="sub">フォルダがなければ全ファイルが通常素材として処理されます。Shutterstock・Pixta は AI 素材受付停止のため AI フォルダは除外されます。</p>
 </section>
 
 <!-- 9. Test Mode -->
@@ -723,7 +723,7 @@ python pixta_login.py         # Pixta</code></pre>
       <tr><th>サイト</th><th>停止位置</th></tr>
       <tr><td>Adobe Stock</td><td>一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材はAIチェックON → 全選択完了 → <strong>「審査に登録」ボタン手前</strong></td></tr>
       <tr><td>Shutterstock</td><td>一括アップロード → CSV 適用完了 → <strong>提出ボタン手前</strong></td></tr>
-      <tr><td>Pixta 画像</td><td>フェーズごとにアップロード → AI ファイルのみ選択的にAIチェック → 全選択完了 → <strong>「選択した作品を登録」ボタン手前</strong></td></tr>
+      <tr><td>Pixta 画像</td><td>フェーズごとにアップロード → 全選択完了 → <strong>「選択した作品を登録」ボタン手前</strong></td></tr>
       <tr><td>Pixta 動画</td><td>タイトル/タグ入力完了 → <strong>審査申請の手前</strong></td></tr>
     </table>
 
