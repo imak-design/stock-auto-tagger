@@ -951,7 +951,6 @@ class StockTaggerApp:
             log("[—] Adobe Stock は無効です。スキップします。")
         elif not ADOBE_SESSION.exists():
             log("[!] adobe_session.json が見つかりません。Adobeをスキップします。")
-            failed_services.append("Adobe Stock")
         elif not all_adobe_files:
             log("[!] Adobeにアップロード対象のファイルがありません。Adobeをスキップします。")
         elif not adobe_csvs:
@@ -1002,7 +1001,6 @@ class StockTaggerApp:
             log("[—] Shutterstock は無効です。スキップします。")
         elif not SS_SESSION.exists():
             log("[!] shutterstock_session.json が見つかりません。Shutterstockをスキップします。")
-            failed_services.append("Shutterstock")
         elif not all_ss_files:
             log("[!] Shutterstockにアップロード対象のファイルがありません。Shutterstockをスキップします。")
         elif not ss_csvs:
@@ -1041,7 +1039,6 @@ class StockTaggerApp:
             log("[—] Pixta は無効です。スキップします。")
         elif not PIXTA_SESSION.exists():
             log("[!] pixta_session.json が見つかりません。Pixtaをスキップします。")
-            failed_services.append("Pixta")
         else:
             # ファイル収集
             all_pixta = get_upload_targets(folder_path, "pixta")
