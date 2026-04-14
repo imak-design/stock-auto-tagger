@@ -1,6 +1,6 @@
 {
-  "input_folder": "",
-  "variation_folder": "",
+  "input_folder": "input",
+  "variation_folder": "variation",
   "backup_folder": "",
   "enabled_sites": ["adobe", "shutterstock", "pixta"],
   "test_mode": true

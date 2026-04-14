@@ -566,22 +566,26 @@ playwright install chromium</code></pre>
   <pre><code>cp config.example.json config.json</code></pre>
   <p><code>config.json</code> を開いて設定を入力：</p>
   <pre><code>{
-  "input_folder": "/Users/あなた/Desktop/stock_input",
-  "variation_folder": "",
+  "input_folder": "input",
+  "variation_folder": "variation",
   "backup_folder": "",
-  "enabled_sites": ["adobe", "shutterstock", "pixta"]
+  "enabled_sites": ["adobe", "shutterstock", "pixta"],
+  "test_mode": true
 }</code></pre>
+  <div class="alert-info alert">
+    <code>input</code> と <code>variation</code> フォルダはプロジェクト内にあらかじめ用意されています。デフォルト設定のまま使えます。別の場所を使いたい場合は絶対パスに変更してください。
+  </div>
   <table>
     <tr><th>項目</th><th>説明</th></tr>
-    <tr><td><code>input_folder</code></td><td>素材を置くフォルダ（JPG/PNG/MP4 を入れる。サブフォルダ <code>AI/</code> <code>Photo/</code> <code>Vector/</code> で振り分け）</td></tr>
-    <tr><td><code>variation_folder</code></td><td>バリエーション素材フォルダ（工程0用、不要なら空欄）</td></tr>
+    <tr><td><code>input_folder</code></td><td>素材を置くフォルダ（デフォルト: プロジェクト内 <code>input/</code>。サブフォルダ <code>AI/</code> <code>Photo/</code> <code>Vector/</code> も同梱済み）</td></tr>
+    <tr><td><code>variation_folder</code></td><td>バリエーション素材フォルダ（デフォルト: プロジェクト内 <code>variation/</code>。工程0用、不要なら空欄）</td></tr>
     <tr><td><code>backup_folder</code></td><td>バックアップ先（不要なら空欄）</td></tr>
     <tr><td><code>enabled_sites</code></td><td>アップロードするサイト（不要なサイトを配列から削除）</td></tr>
     <tr><td><code>test_mode</code></td><td><code>true</code> で審査申請をスキップ（GUI からも切替可）</td></tr>
   </table>
 
-  <h3>素材フォルダのサブフォルダ作成</h3>
-  <p><code>input_folder</code> に設定したフォルダの中に、素材の種類に応じてサブフォルダを作成してください。<strong>サブフォルダがない場合、すべて通常のイラストとして処理されます。</strong></p>
+  <h3>素材フォルダのサブフォルダ</h3>
+  <p>デフォルトの <code>input/</code> フォルダ内にサブフォルダがあらかじめ用意されています。<strong>サブフォルダに入れなかった素材は、すべて通常のイラストとして処理されます。</strong></p>
   <table>
     <tr><th>サブフォルダ</th><th>用途</th><th>必要な人</th></tr>
     <tr><td><code>AI/</code></td><td>AI生成画像</td><td>AI で生成した画像は必ずここに入れてください（Adobe で AI生成の申告が自動設定されます。Shutterstock・Pixta は AI 素材受付停止のため除外されます）</td></tr>
@@ -589,7 +593,7 @@ playwright install chromium</code></pre>
     <tr><td><code>Vector/</code></td><td>ベクター素材（EPS + PNG）</td><td>EPS ファイルをアップロードする人</td></tr>
   </table>
   <div class="alert-info alert">
-    通常のイラスト・動画素材は <code>input_folder</code> 直下にそのまま入れてください。必要なフォルダだけ作れば OK です。<br>
+    通常のイラスト・動画素材は <code>input/</code> 直下にそのまま入れてください。使わないサブフォルダはそのまま空で OK です。<br>
     Vector フォルダ内は素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください（例: <code>Vector/260405_crown_vector/</code> に <code>.eps</code> と <code>.png</code>）。
   </div>
 </section>
@@ -682,7 +686,7 @@ python pixta_login.py         # Pixta</code></pre>
 
   <h3>基本的な流れ</h3>
   <div class="flow">
-    <div class="flow-step step-file">1. <code>input_folder</code> に素材ファイルを入れる</div>
+    <div class="flow-step step-file">1. <code>input/</code> フォルダに素材ファイルを入れる</div>
     <div class="flow-arrow">↓</div>
     <div class="flow-step step-ai">2.【工程1→全自動】を押す → タグ生成 → 全サイトアップロード → ファイル移動まで全自動</div>
   </div>
@@ -696,7 +700,7 @@ python pixta_login.py         # Pixta</code></pre>
 <section id="folders">
   <h2>8. フォルダ構成と振り分け</h2>
   <div class="card">
-    <pre><code>input_folder/
+    <pre><code>input/                        ← プロジェクト内に同梱済み
 ├── image1.jpg            ← 通常素材
 ├── image2.png
 ├── video1.mp4

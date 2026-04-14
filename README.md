@@ -91,12 +91,12 @@ playwright install chromium
 cp config.example.json config.json
 ```
 
-`config.json` を開いて設定を入力してください：
+`config.json` を開いて設定を確認してください（デフォルトのままでも使えます）：
 
 ```json
 {
-  "input_folder": "/Users/あなた/Desktop/stock_input",
-  "variation_folder": "/Users/あなた/Desktop/stock_variation",
+  "input_folder": "input",
+  "variation_folder": "variation",
   "backup_folder": "",
   "enabled_sites": ["adobe", "shutterstock", "pixta"]
 }
@@ -104,15 +104,15 @@ cp config.example.json config.json
 
 | 項目 | 説明 |
 |------|------|
-| `input_folder` | 素材を置くフォルダ（JPG/PNG/MP4 を入れる） |
-| `variation_folder` | バリエーション素材フォルダ（工程0で使用、不要なら空欄） |
+| `input_folder` | 素材を置くフォルダ（デフォルト: プロジェクト内の `input/`） |
+| `variation_folder` | バリエーション素材フォルダ（デフォルト: プロジェクト内の `variation/`、不要なら空欄） |
 | `backup_folder` | バックアップ先（不要なら空欄） |
 | `enabled_sites` | アップロードするサイト（不要なサイトを配列から削除） |
 | `test_mode` | `true`（初期値）で審査申請をスキップ。慣れたら `false` にすると全自動で審査まで実行（GUI からも切替可） |
 
 #### 素材フォルダのサブフォルダ作成
 
-`input_folder` に設定したフォルダの中に、素材の種類に応じてサブフォルダを作成してください。**サブフォルダがない場合、すべて通常のイラストとして処理されます。**
+`input/` フォルダには `AI/`・`Photo/`・`Vector/` サブフォルダがあらかじめ用意されています。素材の種類に応じて使い分けてください。**サブフォルダに入れなければ、通常のイラストとして処理されます。**
 
 | サブフォルダ | 用途 | 必要な人 |
 |:---:|------|------|
@@ -227,7 +227,7 @@ python app.py
 
 ### 基本的な流れ
 
-1. `input_folder` に素材ファイル（JPG/PNG/MP4）を入れる
+1. `input/` フォルダに素材ファイル（JPG/PNG/MP4）を入れる
 2. アプリを起動して **【工程1→全自動】** を押す → タグ生成から全サイトアップロード、ファイル移動まで全自動で実行
 
 バリエーションリネームも行う場合は **【工程0→全自動】** を押してください。個別ボタンで1工程ずつ実行することもできます。
@@ -239,15 +239,15 @@ python app.py
 ## フォルダ構成
 
 ```
-input_folder/                  ← 素材を置くフォルダ
+input/                         ← 素材を置くフォルダ（プロジェクト内に同梱）
 ├── image1.jpg
 ├── image2.png
 ├── video1.mp4
-├── AI/                        ← AI生成素材（任意）
+├── AI/                        ← AI生成素材（同梱済み）
 │   └── ai_image.png
-├── Photo/                     ← 写真素材（任意）
+├── Photo/                     ← 写真素材（同梱済み）
 │   └── DSC01234.jpg
-├── Vector/                    ← ベクター素材（任意）
+├── Vector/                    ← ベクター素材（同梱済み）
 │   └── 260402_icon/
 │       ├── 260402_icon.eps
 │       └── 260402_icon.png
