@@ -336,6 +336,10 @@ li { margin-bottom: 6px; }
   このマニュアルは <strong>起動後の GUI 操作専用</strong>です。Python / Git のインストール、依存パッケージ、API キー、各サイトへのログインなど <strong>セットアップ手順は <a href="https://github.com/imak-design/stock-auto-tagger#readme">README.md</a></strong> を参照してください。
 </div>
 
+<div class="alert" style="margin-top: 12px;">
+  ⚠️ <strong>アプリ起動前に各サイトへのログインが必須です。</strong>アプリは起動時に <code>enabled_sites</code> のセッションファイルをチェックし、未保存のサイトがあればエラーダイアログを表示して即終了します。ログインは <code>python program/&lt;site&gt;_login.py</code> を CLI で実行してセッションを保存してください（GUI 内からのログインは非対応）。詳細は <a href="https://github.com/imak-design/stock-auto-tagger#readme">README §6</a>。
+</div>
+
 <!-- TOC -->
 <nav class="toc">
   <h3>目次</h3>
@@ -755,6 +759,11 @@ variation/                    ← おまけ機能（工程0用）
   <h2>7. トラブルシューティング</h2>
   <table>
     <tr><th>症状</th><th>原因</th><th>対処</th></tr>
+    <tr>
+      <td>起動時に「ログインセッションがありません」エラー</td>
+      <td>有効サイトのいずれかでログイン未実施</td>
+      <td>ダイアログに表示されたサイトについて <code>python program/&lt;site&gt;_login.py</code> を CLI で実行してからアプリ再起動</td>
+    </tr>
     <tr>
       <td><code>Session expired</code> / 途中で停止</td>
       <td>サイトのログインセッション切れ</td>
