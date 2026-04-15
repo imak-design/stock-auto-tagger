@@ -1476,6 +1476,8 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
     seconds = int(elapsed % 60)
     elapsed_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
 
+    all_results = results + photo_results + ai_results
+
     return {
         "success": len(all_results),
         "error": len(errors),
