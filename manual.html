@@ -70,7 +70,7 @@ th {
   text-align: left;
   font-weight: 600;
 }
-td { padding: 10px 14px; border-bottom: 1px solid #2a2a4a; }
+td { padding: 10px 14px; border-bottom: 1px solid #2a2a4a; vertical-align: top; }
 tr:hover td { background: #22223a; }
 .center { text-align: center; }
 
@@ -139,6 +139,10 @@ li { margin-bottom: 6px; }
 .alert-info {
   border-left-color: #64ffda;
   background: #1a2a2e;
+}
+.alert-warn {
+  border-left-color: #ffcc66;
+  background: #2a2519;
 }
 
 /* Two columns */
@@ -282,17 +286,6 @@ li { margin-bottom: 6px; }
 .gui-log .info { color: #7ec8e3; }
 .gui-log .warn { color: #e94560; }
 .gui-log .dim { color: #6c7086; }
-.gui-annotation {
-  position: relative;
-  margin: 24px 0 12px;
-}
-.gui-annotation .line {
-  position: absolute;
-  border-left: 2px solid #e94560;
-  height: 100%;
-  left: -16px;
-  top: 0;
-}
 .gui-callout {
   background: #2a1a2a;
   border: 1px solid #e94560;
@@ -303,47 +296,67 @@ li { margin-bottom: 6px; }
   color: #ff9b9b;
 }
 .gui-callout strong { color: #e94560; }
+
+/* Annotation (numbered callouts on GUI) */
+.anno-num {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #e94560;
+  color: #fff;
+  text-align: center;
+  line-height: 20px;
+  font-size: .75rem;
+  font-weight: bold;
+  margin-right: 6px;
+}
+
+/* Scenario */
+.scenario {
+  background: #1a1a2e;
+  border-radius: 10px;
+  padding: 18px 22px;
+  margin-bottom: 14px;
+  border-left: 4px solid #64ffda;
+}
+.scenario h4 { color: #64ffda; margin: 0 0 10px; font-size: 1.05rem; }
+.scenario .steps { margin-left: 18px; }
 </style>
 </head>
 <body>
 
 <div class="header">
   <h1>Stock Auto Tagger</h1>
-  <p>Gemini AI + Playwright で 3 サイトへタグ自動生成 & ブラウザアップロード</p>
+  <p>GUI 操作マニュアル — ボタンを押すだけで 3 サイトへ一括アップロード</p>
 </div>
 
 <div class="container">
+
+<div class="alert alert-info" style="margin-top: 24px;">
+  このマニュアルは <strong>起動後の GUI 操作専用</strong>です。Python / Git のインストール、依存パッケージ、API キー、各サイトへのログインなど <strong>セットアップ手順は <a href="https://github.com/imak-design/stock-auto-tagger#readme">README.md</a></strong> を参照してください。
+</div>
 
 <!-- TOC -->
 <nav class="toc">
   <h3>目次</h3>
   <ol>
-    <li><a href="#overview">システム概要</a></li>
-    <li><a href="#flow">処理フロー</a></li>
-    <li><a href="#files">ファイル構成</a></li>
-    <li><a href="#setup">セットアップ</a></li>
-    <li><a href="#apikey">API キーの設定</a></li>
-    <li><a href="#login">サイトログイン</a></li>
-    <li><a href="#usage">使い方</a></li>
-    <li><a href="#folders">フォルダ構成と振り分け</a></li>
+    <li><a href="#intro">はじめに</a></li>
+    <li><a href="#gui">GUI 画面の見方</a></li>
+    <li><a href="#folders">素材フォルダの使い分け</a></li>
+    <li><a href="#buttons">ボタンごとの処理内容</a></li>
+    <li><a href="#scenarios">使い方シナリオ</a></li>
     <li><a href="#testmode">テストモード</a></li>
-    <li><a href="#customize">カスタマイズ</a></li>
     <li><a href="#trouble">トラブルシューティング</a></li>
-    <li><a href="#tech">技術スタック・料金</a></li>
+    <li><a href="#customize">カスタマイズ</a></li>
+    <li><a href="#formats">対応ファイル形式早見表</a></li>
   </ol>
 </nav>
 
-<!-- 1. Overview -->
-<section id="overview">
-  <h2>1. システム概要</h2>
+<!-- 1. Intro -->
+<section id="intro">
+  <h2>1. はじめに</h2>
   <div class="card">
-    <p>ストック素材（画像・動画・ベクター EPS）を <strong>3 つのストックフォトサイト</strong>に一括登録するための自動化ツールです。</p>
-    <ul style="margin-top:12px">
-      <li><strong>Gemini AI</strong> で画像・動画を解析し、英語/日本語のタイトル・キーワード・カテゴリを自動生成</li>
-      <li><strong>バッチ処理</strong>: 画像を最大10枚ずつまとめて1リクエストで解析（API消費を大幅削減）</li>
-      <li><strong>Playwright</strong> でブラウザを自動操作し、ファイルアップロード → メタデータ適用 → 審査提出まで全自動</li>
-      <li>GUI（Tkinter）でボタンを押すだけで操作可能。API概算リクエスト数やアップロード制限も自動チェック</li>
-    </ul>
+    <p>ストック素材（画像・動画・ベクター EPS）を <strong>Adobe Stock / Shutterstock / Pixta</strong> の3サイトへ一括登録する自動化ツールです。Gemini AI でタイトル・キーワード・カテゴリを生成し、Playwright でブラウザを自動操作してアップロード〜審査提出まで全自動で実行します。</p>
   </div>
 
   <h3>対応サイトとファイル形式</h3>
@@ -353,9 +366,14 @@ li { margin-bottom: 6px; }
     <tr><td>Shutterstock</td><td class="center">JPG</td><td class="center">MP4 / MOV</td><td class="center">EPS</td></tr>
     <tr><td>Pixta</td><td class="center">JPG / PNG</td><td class="center">MP4 / MOV</td><td class="center">ZIP (EPS+PNG)</td></tr>
   </table>
-  <p class="sub">※ Shutterstock は PNG 非対応のため、JPG と動画のみアップロードされます。</p>
+  <p class="sub">※ Shutterstock は PNG 非対応のため、JPG と動画のみアップロードされます。<br>
+  ※ Shutterstock・Pixta は AI 生成素材の受付を停止中のため、AI 素材はこれらのサイトから自動除外されます。</p>
+</section>
 
-  <h3>GUI 画面イメージ</h3>
+<!-- 2. GUI -->
+<section id="gui">
+  <h2>2. GUI 画面の見方</h2>
+
   <div class="gui-mock">
     <div class="gui-title">
       <span>Stock Media</span><span class="accent"> Auto Tagger</span>
@@ -363,34 +381,33 @@ li { margin-bottom: 6px; }
     </div>
     <div class="gui-card">
       <div class="gui-row">
-        <span class="gui-label">素材フォルダ</span>
-        <span class="gui-input">/Users/you/Desktop/stock_input</span>
+        <span class="gui-label"><span class="anno-num">1</span>素材フォルダ</span>
+        <span class="gui-input">/Users/you/stock-auto-tagger/input</span>
         <span class="gui-btn-sm">参照</span>
       </div>
       <div class="gui-row">
-        <span class="gui-label">バリエーションフォルダ</span>
+        <span class="gui-label"><span class="anno-num">2</span>バリエーション</span>
         <span class="gui-input" style="color:#6c7086"></span>
         <span class="gui-btn-sm">参照</span>
       </div>
       <div class="gui-row">
-        <span class="gui-label">アップロード先</span>
+        <span class="gui-label"><span class="anno-num">3</span>アップロード先</span>
         <span class="gui-checkbox"><span class="box">✓</span> Adobe</span>
         <span class="gui-checkbox"><span class="box">✓</span> Shutterstock</span>
         <span class="gui-checkbox"><span class="box">✓</span> Pixta</span>
       </div>
       <div class="gui-row">
-        <span class="gui-label">モード</span>
+        <span class="gui-label"><span class="anno-num">4</span>モード</span>
         <span class="gui-checkbox"><span class="box"></span> テストモード（審査申請をスキップ）</span>
-        <span class="gui-estimate" style="margin-left:auto">概算 3 リクエスト</span>
+        <span class="gui-estimate" style="margin-left:auto"><span class="anno-num">5</span>概算 3 リクエスト</span>
       </div>
     </div>
     <div class="gui-btns">
-      <span class="gui-btn btn-step0">⚡ 【工程0→全自動】リネーム → タグ → アップロード</span>
+      <span class="gui-btn btn-step0"><span class="anno-num">6</span>⚡ 【工程0→全自動】リネーム → タグ → アップロード</span>
       <span class="gui-btn btn-step1">▶ 【工程1→全自動】タグ生成 → アップロード</span>
-      <span class="gui-status">待機中</span>
     </div>
     <div class="gui-btns">
-      <span class="gui-btn btn-step0" style="font-size:.75rem">⚡ 【工程0】リネーム</span>
+      <span class="gui-btn btn-step0" style="font-size:.75rem"><span class="anno-num">7</span>⚡ 【工程0】リネーム</span>
       <span class="gui-btn btn-step1" style="font-size:.75rem">▶ 【工程1】タグ生成 & CSV出力</span>
     </div>
     <div class="gui-btns">
@@ -401,348 +418,303 @@ li { margin-bottom: 6px; }
     </div>
     <div class="gui-progress"><div class="gui-progress-bar"></div></div>
     <div class="gui-log">
-      <div class="info">⚡ 工程0 開始: リネーム → 全自動パイプライン</div>
+      <div class="info"><span class="anno-num">8</span>⚡ 工程0 開始: リネーム → 全自動パイプライン</div>
       <div>[1〜10/25] バッチ解析中: image1.png, image2.png, ...</div>
-      <div>&nbsp; 完了: image1.png → Colorful abstract wave pattern</div>
-      <div>&nbsp; 完了: image2.png → Blue gradient background with light</div>
       <div class="ok">✓ タグ生成完了！ 成功: 25件 / エラー: 0件</div>
-      <div class="info">アップロードパイプラインを開始します...</div>
-      <div>────────────────────────────</div>
-      <div class="info">☁ Adobe Stock アップロード開始...</div>
     </div>
   </div>
-  <div class="gui-callout">
-    <strong>ポイント:</strong> モード行の右側に「概算 N リクエスト」が表示され、処理前にAPI消費量を確認できます。【工程1→全自動】を押すだけで、タグ生成から全サイト一括アップロード、ファイル移動まで全自動で実行されます。個別ボタンで1工程ずつ実行することもできます。
-  </div>
-</section>
 
-<!-- 2. Flow -->
-<section id="flow">
-  <h2>2. 処理フロー</h2>
+  <h3>各部位の説明</h3>
+  <table>
+    <tr><th style="width: 60px">#</th><th>項目</th><th>説明</th></tr>
+    <tr><td class="center"><span class="anno-num">1</span></td><td>素材フォルダ</td><td>タグ生成とアップロードの対象ファイルを置く場所。デフォルトはプロジェクト内の <code>input/</code>。</td></tr>
+    <tr><td class="center"><span class="anno-num">2</span></td><td>バリエーションフォルダ</td><td>工程0で色違いリネームする素材の置き場。空欄でも OK（おまけ機能）。詳細は <a href="#folders">§3</a>。</td></tr>
+    <tr><td class="center"><span class="anno-num">3</span></td><td>アップロード先</td><td>有効にするサイトのチェックボックス。OFF のサイトは全工程でスキップされます。</td></tr>
+    <tr><td class="center"><span class="anno-num">4</span></td><td>テストモード</td><td>ON にすると各サイトで「審査申請ボタンの手前」で停止。詳細は <a href="#testmode">§6</a>。</td></tr>
+    <tr><td class="center"><span class="anno-num">5</span></td><td>概算リクエスト数</td><td>これから押す処理で消費する Gemini API のリクエスト数目安。次項参照。</td></tr>
+    <tr><td class="center"><span class="anno-num">6</span></td><td>全自動ボタン（上段）</td><td>最後まで一気通貫で実行。詳細は <a href="#buttons">§4</a>。</td></tr>
+    <tr><td class="center"><span class="anno-num">7</span></td><td>個別実行ボタン（下段）</td><td>1工程ずつ実行。部分的な再処理に便利。</td></tr>
+    <tr><td class="center"><span class="anno-num">8</span></td><td>ログ・進捗バー</td><td>実行中の進行状況をリアルタイム表示。</td></tr>
+  </table>
 
-  <h3>一気通貫モード（工程0）</h3>
-  <div class="flow">
-    <div class="flow-step step-file">バリエーションリネーム<br><span class="sub">Gemini Flash-Lite で色名判定</span></div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-ai">工程1: Gemini AI バッチ解析 → CSV / メタデータ生成<br><span class="sub">画像を最大10枚ずつバッチ処理。動画・ベクター・写真・AI全素材を一括解析</span></div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-upload">工程2: Adobe Stock 一括アップロード<br><span class="sub">全素材（通常+ベクター+AI+写真）を一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材にはAIチェックON → 審査提出</span></div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-upload">工程3: Shutterstock 一括アップロード<br><span class="sub">全素材（通常+ベクター+写真）を一括アップロード → CSV適用 → 画像タブ・動画タブの順に提出（AI素材はSS非対応のため除外）</span></div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-upload">工程4: Pixta 3フェーズアップロード<br><span class="sub">1: イラスト+ベクター → 2: 動画（工程1の結果を使い回し） → 3: 写真（AI素材はPIXTA受付停止のため除外）</span></div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-file">工程5: ファイル移動<br><span class="sub">処理済みファイルをアーカイブへ</span></div>
-  </div>
-
-  <h3>バッチ処理の仕組み</h3>
+  <h3>概算リクエスト数と無料枠について</h3>
   <div class="card">
-    <p>工程1では JPG/PNG を区別せず <strong>最大10枚ずつ</strong> まとめて1リクエストで処理します。透過 PNG には画像ごとに背景情報が自動付与され、タイトル・キーワードに反映されます。</p>
+    <p>モード行の右側に、次に押す処理で消費する <strong>Gemini API リクエスト数の概算</strong>が表示されます。Gemini API の無料枠には1日の上限があり、バッチ処理（画像最大10枚＝1リクエスト）で消費を抑えていますが、目安は把握しておきましょう。</p>
+
+    <h4>1日に処理できる素材数の目安（無料枠）</h4>
     <table>
-      <tr><th>画像タイプ</th><th>背景情報</th></tr>
-      <tr><td>JPEG / 透過なし PNG</td><td>なし（通常背景）</td></tr>
-      <tr><td>透過あり PNG</td><td>「透明背景」の説明が個別に付与される</td></tr>
+      <tr><th>処理内容</th><th>1日あたり</th></tr>
+      <tr><td>画像のタグ生成（工程1）</td><td><strong>約 100〜200 枚</strong>（10枚バッチで処理）</td></tr>
+      <tr><td>動画のタグ生成（工程1）</td><td><strong>約 20 本</strong>（1本 = 1リクエスト）</td></tr>
+      <tr><td>バリエーションリネーム（工程0）</td><td><strong>約 20 セット</strong>（1セット = 1リクエスト）</td></tr>
     </table>
-    <p style="margin-top:12px">動画は個別処理（1本 = 1リクエスト）ですが、工程1で解析した結果は <code>video_metadata.json</code> に保存され、工程4の Pixta 動画アップロード時にそのまま使い回されます（API再呼び出し不要）。</p>
-    <p style="margin-top:8px">バリエーションリネーム（工程0）も最適化されており、キーワードと各画像の色名を <strong>1回のAPIコール</strong> で取得します。</p>
+
+    <div class="alert alert-info">
+      <strong>リネーム（工程0）とタグ生成（工程1）は別のモデルを使うため、上限枠も別々にカウントされます。</strong>
+      <ul style="margin-top: 6px">
+        <li>工程0 リネーム → <code>gemini-2.5-flash-lite</code> の枠</li>
+        <li>工程1 タグ生成 → <code>gemini-3-flash-preview</code> の枠</li>
+      </ul>
+      <p style="margin-top: 8px">つまり <strong>「リネームの枠を使い切ったらタグ生成もできなくなる」ということはありません</strong>。逆も同じく、タグ生成の枠を使い切っても翌日リセットまでリネームは動きます。</p>
+      <p style="margin-top: 6px">※ 枠が独立しているだけで、処理の中身は振り替えできません（例: リネーム用の枠を使ってタグ生成はしません）。</p>
+    </div>
+
+    <p class="sub">※ 無料 API の仕様・上限は変更される場合があります。最新値は <a href="https://ai.google.dev/gemini-api/docs/rate-limits">Google AI Studio のレート制限ページ</a> を確認してください。上限は日本時間 17:00 頃にリセットされます。</p>
   </div>
 
-  <h3>全自動ボタン</h3>
-  <p>押すだけで最後まで一気通貫で実行します。</p>
-  <div class="gui-mock" style="margin-bottom:20px">
-    <div class="gui-btns">
-      <span class="gui-btn btn-step0">⚡ 【工程0→全自動】リネーム → タグ → アップロード</span>
-      <span class="gui-btn btn-step1">▶ 【工程1→全自動】タグ生成 → アップロード</span>
-    </div>
-  </div>
-  <table>
-    <tr><th>ボタン</th><th>処理内容</th></tr>
-    <tr><td><strong>工程0→全自動</strong></td><td>リネーム → タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
-    <tr><td><strong>工程1→全自動</strong></td><td>タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫</td></tr>
-  </table>
-
-  <h3>個別実行ボタン</h3>
-  <p>1工程ずつ実行したい場合に使います。</p>
-  <div class="gui-mock" style="margin-bottom:20px">
-    <div class="gui-btns">
-      <span class="gui-btn btn-step0" style="font-size:.75rem">⚡ 【工程0】リネーム</span>
-      <span class="gui-btn btn-step1" style="font-size:.75rem">▶ 【工程1】タグ生成 & CSV出力</span>
-    </div>
-    <div class="gui-btns">
-      <span class="gui-btn btn-adobe">☁ 【工程2】Adobe</span>
-      <span class="gui-btn btn-ss">☁ 【工程3】Shutterstock</span>
-      <span class="gui-btn btn-pixta">🌸 【工程4】Pixta</span>
-      <span class="gui-btn btn-move">📦 【工程5】ファイル移動</span>
-    </div>
-  </div>
-  <table>
-    <tr><th>ボタン</th><th>処理内容</th></tr>
-    <tr><td><strong>工程0</strong></td><td>バリエーションリネームのみ</td></tr>
-    <tr><td><strong>工程1</strong></td><td>Gemini バッチ解析 → CSV 生成 → メタデータ埋込のみ</td></tr>
-    <tr><td><strong>工程2</strong></td><td>Adobe Stock 一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材はAIチェックON → 審査提出</td></tr>
-    <tr><td><strong>工程3</strong></td><td>Shutterstock 一括アップロード → CSV適用 → 画像タブ・動画タブ順に提出</td></tr>
-    <tr><td><strong>工程4</strong></td><td>Pixta 3フェーズ（1: イラスト+ベクター → 2: 動画 → 3: 写真） → 審査申請（AI素材は除外）</td></tr>
-    <tr><td><strong>工程5</strong></td><td>処理済みファイルをアーカイブフォルダへ移動</td></tr>
-  </table>
-</section>
-
-<!-- 3. Files -->
-<section id="files">
-  <h2>3. ファイル構成</h2>
-  <table>
-    <tr><th>ファイル</th><th>説明</th></tr>
-    <tr><td><code>app.py</code></td><td>GUI アプリケーション（メインエントリ）</td></tr>
-    <tr><td><code>stock_tagger.py</code></td><td>Gemini AI 解析・CSV 生成・メタデータ埋込</td></tr>
-    <tr><td><code>adobe_portal.py</code></td><td>Adobe Stock ブラウザ自動化</td></tr>
-    <tr><td><code>shutterstock_portal.py</code></td><td>Shutterstock ブラウザ自動化</td></tr>
-    <tr><td><code>pixta_portal.py</code></td><td>Pixta 画像ブラウザ自動化</td></tr>
-    <tr><td><code>pixta_footage_portal.py</code></td><td>Pixta 動画ブラウザ自動化</td></tr>
-    <tr><td><code>*_login.py</code></td><td>各サイトのログイン・セッション保存</td></tr>
-    <tr><td><code>prompts/</code></td><td>Gemini AI 用プロンプト（テキスト編集でカスタマイズ可）</td></tr>
-    <tr><td><code>config.example.json</code></td><td>設定ファイルのテンプレート</td></tr>
-    <tr><td><code>requirements.txt</code></td><td>Python 依存パッケージ一覧</td></tr>
-    <tr><td><code>起動する.bat</code></td><td>Windows 用起動スクリプト</td></tr>
-    <tr><td><code>起動.command</code></td><td>Mac 用起動スクリプト</td></tr>
-  </table>
-</section>
-
-<!-- 4. Setup -->
-<section id="setup">
-  <h2>4. セットアップ</h2>
-
-  <h3>Step 1: Python のインストール</h3>
-  <div class="cols">
-    <div class="card-sm">
-      <h4><span class="badge badge-mac">Mac</span></h4>
-      <pre><code># Homebrew をインストール（まだの場合）
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Python をインストール
-brew install python</code></pre>
-    </div>
-    <div class="card-sm">
-      <h4><span class="badge badge-win">Windows</span></h4>
-      <p><a href="https://www.python.org/downloads/">python.org</a> からインストーラーをダウンロード。<br>
-      インストール時に <strong>「Add Python to PATH」にチェック</strong> を入れてください。</p>
-    </div>
-  </div>
-
-  <h3>Step 2: Git のインストール</h3>
-  <div class="cols">
-    <div class="card-sm">
-      <h4><span class="badge badge-mac">Mac</span></h4>
-      <p>ターミナルで <code>git --version</code> を実行すると、初回は Xcode Command Line Tools と一緒に自動インストールされます。</p>
-      <p class="sub">Claude Code でカスタマイズする場合は Git のインストールが必須です。</p>
-    </div>
-    <div class="card-sm">
-      <h4><span class="badge badge-win">Windows</span></h4>
-      <p><a href="https://git-scm.com/downloads/win">git-scm.com</a> からインストーラーをダウンロードし、デフォルト設定のままインストール。</p>
-      <p class="sub">Git を入れたくない場合は、GitHub ページの緑色の「Code」ボタン → 「Download ZIP」からダウンロードしてください。</p>
-    </div>
-  </div>
-
-  <h3>Step 3: リポジトリのダウンロード</h3>
-  <pre><code>git clone https://github.com/imak-design/stock-auto-tagger.git
-cd stock-auto-tagger</code></pre>
-
-  <h3>Step 4: 依存パッケージのインストール</h3>
-  <div class="cols">
-    <div class="card-sm">
-      <h4><span class="badge badge-mac">Mac</span></h4>
-      <pre><code>python3 -m venv venv
-source venv/bin/activate
-pip3 install -r requirements.txt
-brew install python-tk@3.14
-playwright install chromium</code></pre>
-    </div>
-    <div class="card-sm">
-      <h4><span class="badge badge-win">Windows</span></h4>
-      <pre><code>pip install -r requirements.txt
-playwright install chromium</code></pre>
-    </div>
-  </div>
-
-  <h3>Step 5: 設定ファイルを作成</h3>
-  <pre><code>cp config.example.json config.json</code></pre>
-  <p><code>config.json</code> を開いて設定を入力：</p>
-  <pre><code>{
-  "input_folder": "input",
-  "variation_folder": "variation",
-  "backup_folder": "",
-  "enabled_sites": ["adobe", "shutterstock", "pixta"],
-  "test_mode": true
-}</code></pre>
-  <div class="alert-info alert">
-    <code>input</code> と <code>variation</code> フォルダはプロジェクト内にあらかじめ用意されています。デフォルト設定のまま使えます。別の場所を使いたい場合は絶対パスに変更してください。
-  </div>
-  <table>
-    <tr><th>項目</th><th>説明</th></tr>
-    <tr><td><code>input_folder</code></td><td>素材を置くフォルダ（デフォルト: プロジェクト内 <code>input/</code>。サブフォルダ <code>AI/</code> <code>Photo/</code> <code>Vector/</code> も同梱済み）</td></tr>
-    <tr><td><code>variation_folder</code></td><td>バリエーション素材フォルダ（デフォルト: プロジェクト内 <code>variation/</code>。工程0用、不要なら空欄）</td></tr>
-    <tr><td><code>backup_folder</code></td><td>バックアップ先（不要なら空欄）</td></tr>
-    <tr><td><code>enabled_sites</code></td><td>アップロードするサイト（不要なサイトを配列から削除）</td></tr>
-    <tr><td><code>test_mode</code></td><td><code>true</code> で審査申請をスキップ（GUI からも切替可）</td></tr>
-  </table>
-
-  <h3>素材フォルダのサブフォルダ</h3>
-  <p>デフォルトの <code>input/</code> フォルダ内にサブフォルダがあらかじめ用意されています。<strong>サブフォルダに入れなかった素材は、すべて通常のイラストとして処理されます。</strong></p>
-  <table>
-    <tr><th>サブフォルダ</th><th>用途</th><th>必要な人</th></tr>
-    <tr><td><code>AI/</code></td><td>AI生成画像</td><td>AI で生成した画像は必ずここに入れてください（Adobe で AI生成の申告が自動設定されます。Shutterstock・Pixta は AI 素材受付停止のため除外されます）</td></tr>
-    <tr><td><code>Photo/</code></td><td>写真素材</td><td>Adobe で写真カテゴリ、Pixta で写真ページにアップしたい人</td></tr>
-    <tr><td><code>Vector/</code></td><td>ベクター素材（EPS + PNG）</td><td>EPS ファイルをアップロードする人</td></tr>
-  </table>
-  <div class="alert-info alert">
-    通常のイラスト・動画素材は <code>input/</code> 直下にそのまま入れてください。使わないサブフォルダはそのまま空で OK です。<br>
-    Vector フォルダ内は素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください（例: <code>Vector/260405_crown_vector/</code> に <code>.eps</code> と <code>.png</code>）。
-  </div>
-</section>
-
-<!-- 5. API Key -->
-<section id="apikey">
-  <h2>5. API キーの設定</h2>
-  <div class="card">
-    <div class="alert-info alert">
-      API キーはプロジェクトフォルダの<strong>外</strong>に保存します。フォルダを共有しても API キーが漏れる心配がありません。
-    </div>
-    <table>
-      <tr><th>OS</th><th>保存先パス</th></tr>
-      <tr><td>Mac</td><td><code>~/.stock-auto-tagger/.env</code></td></tr>
-      <tr><td>Windows</td><td><code>C:\Users\ユーザー名\.stock-auto-tagger\.env</code></td></tr>
-    </table>
-    <p><code>.env</code> ファイルの中身：</p>
-    <pre><code>GEMINI_API_KEY=あなたのAPIキー</code></pre>
-  </div>
-
-  <h3>作成コマンド</h3>
-  <div class="cols">
-    <div class="card-sm">
-      <h4><span class="badge badge-mac">Mac</span></h4>
-      <pre><code>mkdir -p ~/.stock-auto-tagger
-echo "GEMINI_API_KEY=ここにキーを貼付" > ~/.stock-auto-tagger/.env</code></pre>
-      <p class="sub">編集: <code>open -e ~/.stock-auto-tagger/.env</code></p>
-    </div>
-    <div class="card-sm">
-      <h4><span class="badge badge-win">Windows</span></h4>
-      <pre><code>mkdir %USERPROFILE%\.stock-auto-tagger
-echo GEMINI_API_KEY=ここにキーを貼付 > %USERPROFILE%\.stock-auto-tagger\.env</code></pre>
-      <p class="sub">編集: <code>notepad %USERPROFILE%\.stock-auto-tagger\.env</code></p>
-    </div>
-  </div>
-
-  <h3>API キーの取得</h3>
-  <p><a href="https://aistudio.google.com/apikey">Google AI Studio</a> で無料取得できます。</p>
-
-  <h3>無料枠の目安（Gemini 3 Flash）</h3>
+  <h3>アップロード前の自動バリデーション</h3>
   <div class="card-sm">
-    <p>無料 API キーは <strong>1日20リクエスト</strong>（1分5リクエスト）の上限があります。バッチ処理により画像最大10枚 = 1リクエスト。</p>
-    <table>
-      <tr><th>モード</th><th>1日あたり</th></tr>
-      <tr><td>工程1のみ（タグ生成）</td><td>約 100〜200 枚（画像のみ。動画は1本 = 1リクエスト）</td></tr>
-      <tr><td>工程0（リネーム + タグ生成）</td><td>リネームにもリクエストを使うため、やや少なくなります</td></tr>
-    </table>
-    <p class="sub">上限は太平洋時間の深夜0時（日本時間 17:00）にリセットされます。起動時にUI上でAPI概算リクエスト数が自動表示されます。</p>
-  </div>
-
-  <div class="alert">
-    <strong>API キーの取り扱い注意</strong>
+    <p>アップロードボタンを押すと、各サイトの制限を自動チェックします：</p>
     <ul>
-      <li>API キーは必ず上記の <code>.env</code> ファイルに書いてください</li>
-      <li><code>config.json</code> など他のファイルには書かないでください</li>
-      <li>AI チャットに API キーを貼り付けると会話ログに残る可能性があります</li>
+      <li>Adobe: 画像 45MB まで</li>
+      <li>Shutterstock: 50MB まで</li>
+      <li>Pixta: 画像 50MB まで（PNG は 30MB まで）、1回 50 枚まで</li>
     </ul>
+    <p class="sub">制限超過ファイルは自動的に除外されてログに表示されます。</p>
   </div>
 </section>
 
-<!-- 6. Login -->
-<section id="login">
-  <h2>6. サイトログイン</h2>
-  <div class="card">
-    <p>使いたいサイトだけ実行してください。ブラウザが開くので手動でログインすると、セッションが自動保存されます。</p>
-    <pre><code>python adobe_login.py        # Adobe Stock
-python shutterstock_login.py  # Shutterstock
-python pixta_login.py         # Pixta</code></pre>
-    <p class="sub">セッションが切れた場合は再度実行してください。</p>
-  </div>
-</section>
-
-<!-- 7. Usage -->
-<section id="usage">
-  <h2>7. 使い方</h2>
-
-  <h3>アプリの起動</h3>
-  <div class="cols">
-    <div class="card-sm">
-      <h4><span class="badge badge-win">Windows</span></h4>
-      <p><code>起動する.bat</code> をダブルクリック</p>
-    </div>
-    <div class="card-sm">
-      <h4><span class="badge badge-mac">Mac</span></h4>
-      <p>初回のみ: <code>chmod +x 起動.command</code><br>
-      その後 <code>起動.command</code> をダブルクリック</p>
-    </div>
-  </div>
-  <p class="sub">またはターミナルから <code>python app.py</code> で起動。</p>
-
-  <h3>基本的な流れ</h3>
-  <div class="flow">
-    <div class="flow-step step-file">1. <code>input/</code> フォルダに素材ファイルを入れる</div>
-    <div class="flow-arrow">↓</div>
-    <div class="flow-step step-ai">2.【工程1→全自動】を押す → タグ生成 → 全サイトアップロード → ファイル移動まで全自動</div>
-  </div>
-  <p>バリエーションリネームも行う場合は <strong>【工程0→全自動】</strong> を押してください。個別ボタンで1工程ずつ実行することもできます。</p>
-  <div class="alert-info alert">
-    モード行の右側に <strong>API概算リクエスト数</strong> が表示されます。アップロード前には <strong>ファイルサイズ制限</strong>（Adobe 45MB / Pixta PNG 30MB / Shutterstock 50MB / Pixta 50枚）のバリデーションも自動実行されます。
-  </div>
-</section>
-
-<!-- 8. Folders -->
+<!-- 3. Folders -->
 <section id="folders">
-  <h2>8. フォルダ構成と振り分け</h2>
+  <h2>3. 素材フォルダの使い分け</h2>
+
   <div class="card">
     <pre><code>input/                        ← プロジェクト内に同梱済み
-├── image1.jpg            ← 通常素材
-├── image2.png
+├── image1.jpg            ← 通常素材（直下）
 ├── video1.mp4
 ├── AI/                   ← AI 生成素材
 │   └── ai_image.png
 ├── Photo/                ← 写真素材
 │   └── DSC01234.jpg
 ├── Vector/               ← ベクター素材
-│   └── 260402_icon/
+│   └── 260402_icon/      ← 素材ごとにサブフォルダ
 │       ├── 260402_icon.eps
 │       └── 260402_icon.png
-└── csv_output/           ← CSV 自動出力（自動作成）</code></pre>
+└── csv_output/           ← CSV 自動出力（自動作成）
+
+variation/                    ← おまけ機能（工程0用）
+└── 01/ 〜 10/             ← 画像バリエーション
+    └── movie/01/ 〜 10/   ← 動画バリエーション</code></pre>
   </div>
 
-  <h3>AI / Photo フォルダによる自動振り分け</h3>
-  <table>
-    <tr><th>フォルダ</th><th>Adobe Stock</th><th>Shutterstock</th><th>Pixta</th></tr>
-    <tr><td>通常（直下）</td><td class="center">イラスト</td><td class="center">通常</td><td class="center">イラストページ</td></tr>
-    <tr><td><code>Photo/</code></td><td class="center">写真カテゴリ</td><td class="center">通常</td><td class="center">写真ページ</td></tr>
-    <tr><td><code>AI/</code></td><td class="center">イラスト + AI チェック</td><td class="center">対象外</td><td class="center">対象外</td></tr>
-  </table>
-  <p class="sub">フォルダがなければ全ファイルが通常素材として処理されます。Shutterstock・Pixta は AI 素材受付停止のため AI フォルダは除外されます。</p>
+  <h3>input/ 直下 — 通常のイラスト・動画</h3>
+  <div class="card-sm">
+    <p><strong>サブフォルダに入れなかった素材は、すべて通常のイラストとして処理されます。</strong></p>
+    <ul>
+      <li>Adobe: イラストカテゴリ</li>
+      <li>Shutterstock: 通常</li>
+      <li>Pixta: イラストページ</li>
+    </ul>
+  </div>
+
+  <h3>input/AI/ — AI 生成画像</h3>
+  <div class="card-sm">
+    <p>AI で生成した画像は必ずここに入れてください。</p>
+    <ul>
+      <li>Adobe: AI 生成の申告が自動 ON</li>
+      <li>Shutterstock・Pixta: 自動的に除外（AI 素材受付停止のため）</li>
+    </ul>
+  </div>
+
+  <h3>input/Photo/ — 写真素材</h3>
+  <div class="card-sm">
+    <ul>
+      <li>Adobe: 写真カテゴリで登録</li>
+      <li>Shutterstock: 通常</li>
+      <li>Pixta: 写真ページで登録</li>
+    </ul>
+  </div>
+
+  <h3>input/Vector/ — ベクター素材（EPS + PNG）</h3>
+  <div class="card-sm">
+    <p><strong>素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください。</strong></p>
+    <pre><code>Vector/
+└── 260402_icon/
+    ├── 260402_icon.eps   ← ベクター本体
+    └── 260402_icon.png   ← プレビュー用</code></pre>
+    <ul>
+      <li>Adobe・Shutterstock: EPS をそのままアップロード</li>
+      <li>Pixta: EPS + PNG を自動で ZIP 化してアップロード</li>
+    </ul>
+  </div>
+
+  <h3>variation/ — 【おまけ】色違いリネーム機能</h3>
+  <div class="card">
+    <p><strong>必須ではありません。</strong>色違いバリエーションを大量に作るときだけ使う、工程0専用のおまけ機能です。</p>
+
+    <h4>何をする機能？</h4>
+    <p>サブフォルダにバラバラのファイル名で素材を入れておくと、Gemini が画像を解析して <code>日付_キーワード_色.拡張子</code> の形式に自動リネーム → <code>input/</code> 直下へ移動します。</p>
+
+    <h4>フォルダ構造</h4>
+    <pre><code>variation/
+├── 01/                   ← 1セット目（色違い群）
+│   ├── aaa.png           ← → 260415_crown_blue.png 等に自動リネーム
+│   ├── bbb.png
+│   └── ccc.png
+├── 02/
+│   └── ...
+└── movie/
+    └── 01/               ← 動画セットも同様の構造</code></pre>
+
+    <div class="alert alert-warn">
+      <strong>色違いを想定した機能です。</strong>デフォルトプロンプトは「色名を判定する」ように書かれているため、<strong>ポーズ違い・形違いなど色以外のバリエーションを入れると命名が破綻します</strong>。そういう素材は <code>variation/</code> ではなく <code>input/</code> 直下に入れてください。
+    </div>
+
+    <div class="alert alert-info">
+      <strong>黒背景の素材推奨。</strong>色判定の精度を上げるため、デフォルトプロンプトは黒背景前提で書かれています。
+    </div>
+
+    <h4>セーフティネット（元素材を残します）</h4>
+    <p>リネーム対象の素材は <strong>元ファイルを削除せずコピーを作成</strong>し、元ファイルはゴミ箱へ送られます。AI の色判定がおかしかった場合でも、<strong>ゴミ箱から復元できる</strong>ので安心して試せます。</p>
+  </div>
 </section>
 
-<!-- 9. Test Mode -->
+<!-- 4. Buttons -->
+<section id="buttons">
+  <h2>4. ボタンごとの処理内容</h2>
+
+  <h3>全自動ボタン（上段）</h3>
+  <p>押すだけで最後まで一気通貫で実行。</p>
+  <div class="gui-mock" style="margin-bottom: 16px">
+    <div class="gui-btns">
+      <span class="gui-btn btn-step0">⚡ 【工程0→全自動】リネーム → タグ → アップロード</span>
+      <span class="gui-btn btn-step1">▶ 【工程1→全自動】タグ生成 → アップロード</span>
+    </div>
+  </div>
+  <table>
+    <tr><th style="width: 30%">ボタン</th><th>処理の流れ</th></tr>
+    <tr>
+      <td><strong>工程0→全自動</strong></td>
+      <td>バリエーションリネーム → タグ生成 → 3サイトアップロード → ファイル移動</td>
+    </tr>
+    <tr>
+      <td><strong>工程1→全自動</strong></td>
+      <td>タグ生成 → 3サイトアップロード → ファイル移動</td>
+    </tr>
+  </table>
+
+  <h3>個別実行ボタン（下段）</h3>
+  <p>1工程ずつ実行したいときに使います。各工程を「入力 → 処理 → 出力」で整理しました。</p>
+
+  <div class="card-sm">
+    <h4>⚡ 工程0 — バリエーションリネーム</h4>
+    <table>
+      <tr><th style="width: 20%">入力</th><td><code>variation/01/</code> 〜 <code>variation/10/</code>、<code>variation/movie/01/</code> 〜 の素材</td></tr>
+      <tr><th>処理</th><td>Gemini Flash-Lite でキーワードと色を1回のAPIコールで判定</td></tr>
+      <tr><th>出力</th><td><code>日付_キーワード_色.ext</code> 形式にリネームして <code>input/</code> 直下へ移動（元ファイルはゴミ箱）</td></tr>
+    </table>
+  </div>
+
+  <div class="card-sm">
+    <h4>▶ 工程1 — タグ生成 & CSV 出力</h4>
+    <table>
+      <tr><th style="width: 20%">入力</th><td><code>input/</code> 内の全素材（直下・AI・Photo・Vector）</td></tr>
+      <tr><th>処理</th><td>Gemini 3 Flash でバッチ解析（画像最大10枚/リクエスト）。動画は個別処理</td></tr>
+      <tr><th>出力</th><td><code>input/csv_output/</code> に Adobe / Shutterstock 用 CSV。Pixta 用は IPTC/XMP を画像に直接埋め込み。動画解析結果は <code>video_metadata.json</code> に保存</td></tr>
+    </table>
+  </div>
+
+  <div class="card-sm">
+    <h4>☁ 工程2 — Adobe Stock アップロード</h4>
+    <table>
+      <tr><th style="width: 20%">入力</th><td><code>input/</code> 全素材 + 工程1 の CSV</td></tr>
+      <tr><th>処理</th><td>ブラウザ自動アップロード → CSV 適用 → 各ファイルのコンテンツタイプ設定（AI 素材は AI チェック ON）→ 審査提出</td></tr>
+      <tr><th>出力</th><td>Adobe Stock の審査キューに登録</td></tr>
+    </table>
+  </div>
+
+  <div class="card-sm">
+    <h4>☁ 工程3 — Shutterstock アップロード</h4>
+    <table>
+      <tr><th style="width: 20%">入力</th><td>JPG + 動画 + EPS（PNG・AI 素材は除外）+ 工程1 の CSV</td></tr>
+      <tr><th>処理</th><td>ブラウザ自動アップロード → CSV 適用 → 画像タブ・動画タブの順に提出</td></tr>
+      <tr><th>出力</th><td>Shutterstock の審査キューに登録</td></tr>
+    </table>
+  </div>
+
+  <div class="card-sm">
+    <h4>🌸 工程4 — Pixta 3フェーズアップロード</h4>
+    <table>
+      <tr><th style="width: 20%">入力</th><td>画像 + 動画 + Vector（ZIP 化）+ 工程1 の埋込メタデータ。AI 素材は除外</td></tr>
+      <tr><th>処理</th><td>フェーズ1: イラスト + ベクター → フェーズ2: 動画（工程1の <code>video_metadata.json</code> を再利用）→ フェーズ3: 写真</td></tr>
+      <tr><th>出力</th><td>Pixta の審査キューに登録</td></tr>
+    </table>
+  </div>
+
+  <div class="card-sm">
+    <h4>📦 工程5 — ファイル移動</h4>
+    <table>
+      <tr><th style="width: 20%">入力</th><td>処理済み素材</td></tr>
+      <tr><th>処理</th><td>アーカイブフォルダへ移動（テストモード中はスキップ）</td></tr>
+      <tr><th>出力</th><td><code>input/</code> がクリアされ、次の素材を受け入れ可能に</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 5. Scenarios -->
+<section id="scenarios">
+  <h2>5. 使い方シナリオ</h2>
+
+  <div class="scenario">
+    <h4>シナリオ A: 通常の一括登録（基本の使い方）</h4>
+    <ol class="steps">
+      <li><code>input/</code> に JPG / PNG / MP4 を入れる（AI 生成は <code>AI/</code>、写真は <code>Photo/</code>、ベクターは <code>Vector/素材名/</code> へ）</li>
+      <li>アプリ起動 → サイトのチェックを確認</li>
+      <li><strong>【工程1→全自動】</strong>をクリック</li>
+      <li>タグ生成 → 3サイトアップロード → ファイル移動まで全自動</li>
+    </ol>
+  </div>
+
+  <div class="scenario">
+    <h4>シナリオ B: バリエーション（色違い）込みで登録</h4>
+    <ol class="steps">
+      <li><code>variation/01/</code>〜<code>10/</code> に色違いセットを入れる（1セット = 同一モチーフの色違い群）</li>
+      <li>通常素材があれば <code>input/</code> にも入れておく</li>
+      <li><strong>【工程0→全自動】</strong>をクリック</li>
+      <li>リネーム → 全素材のタグ生成 → アップロード → ファイル移動まで自動</li>
+    </ol>
+    <p class="sub">※ 色違い以外（ポーズ違い等）は <code>variation/</code> に入れず <code>input/</code> 直下へ。</p>
+  </div>
+
+  <div class="scenario">
+    <h4>シナリオ C: 特定のサイトだけに登録したい</h4>
+    <ol class="steps">
+      <li>アップロード先のチェックを <strong>登録したいサイトだけ ON</strong>、他は OFF</li>
+      <li>あとはシナリオ A / B と同じ操作で OK</li>
+    </ol>
+    <p class="sub">例: Adobe だけ登録したいなら Shutterstock と Pixta のチェックを外す → 全自動を押す。</p>
+  </div>
+
+  <div class="scenario">
+    <h4>シナリオ D: 途中でエラー → 部分的にやり直したい</h4>
+    <p>個別実行ボタンを使います。前工程の成果物（CSV / メタデータ）は残っているので再利用できます。</p>
+    <ul class="steps">
+      <li><strong>Adobe だけ再実行</strong> → 【工程2】Adobe をクリック（タグ生成は再実行不要）</li>
+      <li><strong>Pixta だけ再実行</strong> → 【工程4】Pixta をクリック</li>
+      <li><strong>タグ内容を手動修正してから再アップ</strong> → CSV を編集 → 【工程2〜4】を順番にクリック</li>
+      <li><strong>ファイル移動だけ実行</strong> → 【工程5】ファイル移動</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6. Test Mode -->
 <section id="testmode">
-  <h2>9. テストモード</h2>
+  <h2>6. テストモード</h2>
   <div class="card">
-    <p>GUI の「テストモード」チェックボックスを ON にすると、各サイトで <strong>審査申請の手前で処理が停止</strong> します。</p>
+    <p>GUI の「テストモード」チェックを ON にすると、各サイトで <strong>審査申請ボタンの手前で処理が停止</strong>します。タイトル・タグを手動で確認・修正できます。</p>
 
     <table>
       <tr><th>サイト</th><th>停止位置</th></tr>
-      <tr><td>Adobe Stock</td><td>一括アップロード → CSV適用 → 各ファイルのコンテンツタイプ設定・AI素材はAIチェックON → 全選択完了 → <strong>「審査に登録」ボタン手前</strong></td></tr>
+      <tr><td>Adobe Stock</td><td>一括アップロード → CSV 適用 → コンテンツタイプ設定 → 全選択完了 → <strong>「審査に登録」ボタン手前</strong></td></tr>
       <tr><td>Shutterstock</td><td>一括アップロード → CSV 適用完了 → <strong>提出ボタン手前</strong></td></tr>
       <tr><td>Pixta 画像</td><td>フェーズごとにアップロード → 全選択完了 → <strong>「選択した作品を登録」ボタン手前</strong></td></tr>
-      <tr><td>Pixta 動画</td><td>タイトル/タグ入力完了 → <strong>審査申請の手前</strong></td></tr>
+      <tr><td>Pixta 動画</td><td>タイトル / タグ入力完了 → <strong>審査申請の手前</strong></td></tr>
     </table>
 
-    <div class="flow" style="margin-top:16px">
+    <div class="flow" style="margin-top: 16px">
       <div class="flow-step step-upload">処理完了 → ブラウザが開いたまま停止</div>
       <div class="flow-arrow">↓</div>
-      <div class="flow-step step-test">タイトル・タグを手動で確認・修正</div>
+      <div class="flow-step step-test">ブラウザ上でタイトル・タグを確認 / 修正</div>
       <div class="flow-arrow">↓</div>
       <div class="flow-step step-submit">ブラウザを閉じる → 自動的に次のサイトへ</div>
     </div>
@@ -752,7 +724,6 @@ python pixta_login.py         # Pixta</code></pre>
       <li><strong>全自動ボタン:</strong> ブラウザを閉じずに次の工程へ自動で進み、全工程完了後にポップアップで通知</li>
       <li><strong>個別ボタン:</strong> ブラウザを閉じると次の処理に進みます。ブラウザ待機中はポップアップで通知されます</li>
       <li>ブラウザ内でページ遷移（審査申請ページへ移動など）しても問題ありません</li>
-      <li>各工程の完了時には処理時間が表示されます</li>
     </ul>
   </div>
 
@@ -774,72 +745,35 @@ python pixta_login.py         # Pixta</code></pre>
       <div>&nbsp; CSV適用完了 / コンテンツタイプ設定完了</div>
       <div>[テストモード] 審査申請をスキップしました。</div>
       <div class="dim">ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。</div>
-      <div class="dim">ブラウザが閉じられました。</div>
       <div class="ok">[OK] Adobe 完了: 5件 (処理時間: 1分23秒)</div>
-      <div>────────────────────────────</div>
-      <div class="info">☁ Shutterstock アップロード開始...</div>
     </div>
   </div>
-  <div class="gui-callout">
-    <strong>全自動ボタンの場合:</strong> 各サイトのブラウザが全て開いた状態で完了ポップアップが表示されます。各ブラウザでタイトル・タグを確認・修正し、手動で審査申請してください。<br>
-    <strong>個別ボタンの場合:</strong> 「ブラウザを閉じると次の処理に進みます」のログが出たらポップアップでも通知されます。ブラウザ上で確認・修正し、ブラウザを閉じると自動的に次へ進みます。
-  </div>
 </section>
 
-<!-- 10. Customize -->
-<section id="customize">
-  <h2>10. カスタマイズ</h2>
-
-  <h3>プロンプトの編集</h3>
-  <div class="card-sm">
-    <p><code>prompts/</code> フォルダ内のテキストファイルを編集するだけで、AI のタグ生成ルールを変更できます。Python コードを触る必要はありません。</p>
-    <table>
-      <tr><th>ファイル</th><th>用途</th></tr>
-      <tr><td><code>prompts/image_prompt.txt</code></td><td>画像用プロンプト</td></tr>
-      <tr><td><code>prompts/video_prompt.txt</code></td><td>動画用プロンプト</td></tr>
-    </table>
-  </div>
-
-  <h3>Claude でカスタマイズ</h3>
-  <div class="card-sm">
-    <p>Claude（AI アシスタント）にコードを見せて、やりたいことを伝えるだけでカスタマイズできます。</p>
-    <ul>
-      <li>「Adobe Stock だけ使いたいので、他のサイトの処理を削除して」</li>
-      <li>「動画は扱わないので、画像だけのシンプル版にして」</li>
-      <li>「タグの生成ルールを変えたい」</li>
-    </ul>
-  </div>
-</section>
-
-<!-- 11. Troubleshooting -->
+<!-- 7. Troubleshooting -->
 <section id="trouble">
-  <h2>11. トラブルシューティング</h2>
+  <h2>7. トラブルシューティング</h2>
   <table>
     <tr><th>症状</th><th>原因</th><th>対処</th></tr>
     <tr>
-      <td><code>Session expired</code></td>
-      <td>サイトのセッション切れ</td>
-      <td>該当の <code>*_login.py</code> を再実行</td>
+      <td><code>Session expired</code> / 途中で停止</td>
+      <td>サイトのログインセッション切れ</td>
+      <td>該当の <code>*_login.py</code> を再実行してセッションを更新</td>
     </tr>
     <tr>
       <td>Gemini 429 エラー</td>
-      <td>API レート制限</td>
-      <td>自動リトライで回復待ち（無料枠: 1分5リクエスト）</td>
+      <td>API レート制限 / 無料枠超過</td>
+      <td>自動リトライで回復待ち。1日の上限に達した場合は日本時間 17:00 頃にリセット</td>
     </tr>
     <tr>
-      <td>Pixta タグ 0 個</td>
+      <td>Pixta でタグが 0 個</td>
       <td>Gemini レスポンス異常</td>
-      <td>ログを確認し、プロンプトを調整</td>
-    </tr>
-    <tr>
-      <td>アップロードが途中で停止</td>
-      <td>セッション期限切れ</td>
-      <td>該当サイトに再ログイン</td>
+      <td>ログを確認し、プロンプト（<a href="#customize">§8</a>）を調整</td>
     </tr>
     <tr>
       <td>API キーが見つからない</td>
       <td><code>.env</code> ファイルが未作成</td>
-      <td><a href="#apikey">API キーの設定</a> を参照</td>
+      <td>README.md の「Gemini API キーの設定」を参照</td>
     </tr>
     <tr>
       <td>ブラウザが自動で閉じない<br>（テストモード）</td>
@@ -851,51 +785,79 @@ python pixta_login.py         # Pixta</code></pre>
       <td>ポータル反映遅延</td>
       <td>自動リトライで待機。解消しない場合は手動でリロード</td>
     </tr>
+    <tr>
+      <td>ファイルが除外された</td>
+      <td>サイトのサイズ制限超過</td>
+      <td>ログでファイル名を確認 → リサイズ or 別途手動アップロード（Adobe 45MB / Pixta PNG 30MB / Shutterstock 50MB）</td>
+    </tr>
+    <tr>
+      <td>バリエーションのリネームが変</td>
+      <td>色違い以外が混ざっている / 背景が白</td>
+      <td><code>variation/</code> は色違い専用。色判定が不適切なら元ファイルをゴミ箱から復元</td>
+    </tr>
   </table>
 </section>
 
-<!-- 12. Tech -->
-<section id="tech">
-  <h2>12. 技術スタック・料金</h2>
+<!-- 8. Customize -->
+<section id="customize">
+  <h2>8. カスタマイズ</h2>
 
-  <h3>使用技術</h3>
+  <h3>プロンプトの編集</h3>
+  <div class="card-sm">
+    <p><code>program/prompts/</code> 内のテキストファイルを編集するだけで、AI のタグ生成ルールを変更できます。Python コードを触る必要はありません。</p>
+    <table>
+      <tr><th>ファイル</th><th>用途</th></tr>
+      <tr><td><code>program/prompts/image_prompt.txt</code></td><td>画像用プロンプト（工程1）</td></tr>
+      <tr><td><code>program/prompts/video_prompt.txt</code></td><td>動画用プロンプト（工程1）</td></tr>
+    </table>
+  </div>
+
+  <h3>Claude でカスタマイズ</h3>
+  <div class="card-sm">
+    <p>Claude（AI アシスタント）にコードを見せて、やりたいことを伝えるだけでカスタマイズできます：</p>
+    <ul>
+      <li>「Adobe Stock だけ使いたいので、他のサイトの処理を削除して」</li>
+      <li>「動画は扱わないので、画像だけのシンプル版にして」</li>
+      <li>「タグの生成ルールを変えたい」</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9. Formats -->
+<section id="formats">
+  <h2>9. 対応ファイル形式早見表</h2>
+
+  <h3>サイト × ファイル種別</h3>
   <table>
-    <tr><th>技術</th><th>用途</th></tr>
-    <tr><td>Python 3.10+</td><td>メイン言語</td></tr>
-    <tr><td>Tkinter</td><td>GUI</td></tr>
-    <tr><td>Google Gemini 3 Flash</td><td>画像・動画解析、タグ生成</td></tr>
-    <tr><td>Gemini Flash-Lite</td><td>バリエーションリネーム（コスト削減）</td></tr>
-    <tr><td>Playwright (Chromium)</td><td>ブラウザ自動化（3サイト）</td></tr>
-    <tr><td>Pillow / NumPy</td><td>画像処理・背景検出（PNG透過/黒背景判定）</td></tr>
-    <tr><td>python-dotenv</td><td>API キー管理</td></tr>
+    <tr><th>ファイル種別</th><th class="center">Adobe Stock</th><th class="center">Shutterstock</th><th class="center">Pixta</th></tr>
+    <tr><td>JPG</td><td class="center">対象</td><td class="center">対象</td><td class="center">対象</td></tr>
+    <tr><td>PNG</td><td class="center">対象</td><td class="center">対象外</td><td class="center">対象</td></tr>
+    <tr><td>MP4 / MOV（動画）</td><td class="center">対象</td><td class="center">対象</td><td class="center">対象</td></tr>
+    <tr><td>EPS（ベクター）</td><td class="center">対象</td><td class="center">対象</td><td class="center">ZIP(EPS+PNG)</td></tr>
   </table>
 
-  <h3>料金</h3>
-  <div class="card-sm">
-    <table>
-      <tr><th>サービス</th><th>料金</th></tr>
-      <tr><td>Gemini API（無料枠）</td><td>無料（以下の1日の上限あり）</td></tr>
-      <tr><td>Gemini API（有料）</td><td><a href="https://ai.google.dev/pricing">Google AI 料金ページ</a> 参照</td></tr>
-      <tr><td>Adobe Stock / Shutterstock / Pixta</td><td>コントリビューター登録は無料</td></tr>
-    </table>
-  </div>
+  <h3>サブフォルダ × サイト振り分け</h3>
+  <table>
+    <tr><th>フォルダ</th><th class="center">Adobe Stock</th><th class="center">Shutterstock</th><th class="center">Pixta</th></tr>
+    <tr><td>通常（<code>input/</code> 直下）</td><td class="center">イラスト</td><td class="center">通常</td><td class="center">イラストページ</td></tr>
+    <tr><td><code>Photo/</code></td><td class="center">写真カテゴリ</td><td class="center">通常</td><td class="center">写真ページ</td></tr>
+    <tr><td><code>AI/</code></td><td class="center">イラスト + AI チェック</td><td class="center">対象外</td><td class="center">対象外</td></tr>
+    <tr><td><code>Vector/</code></td><td class="center">EPS</td><td class="center">EPS</td><td class="center">ZIP(EPS+PNG)</td></tr>
+  </table>
 
-  <h3>無料枠で1日に処理できる目安</h3>
-  <div class="card-sm">
-    <p>Gemini API の無料枠には1日の利用上限があります。このツールはバッチ処理で画像を最大10枚ずつまとめて処理するため、少ない回数で多くの素材を処理できます。</p>
-    <table>
-      <tr><th>処理内容</th><th>1日の目安</th></tr>
-      <tr><td>画像のタグ生成のみ</td><td><strong>約100〜200枚</strong></td></tr>
-      <tr><td>動画のタグ生成</td><td><strong>約20本</strong>（動画は1本ずつ処理されるため）</td></tr>
-      <tr><td>リネーム + タグ生成</td><td>リネームにもAPIを使うため、画像のみの場合より少なくなります</td></tr>
-    </table>
-    <p style="margin-top:12px">上限は毎日 日本時間 17:00 にリセットされます。それ以上処理する場合は有料プランをご検討ください。</p>
-    <p class="sub">※ API の仕様・料金は変更される場合があります。最新情報は各公式サイトを参照してください。</p>
-  </div>
+  <h3>サイトごとのファイルサイズ上限</h3>
+  <table>
+    <tr><th>サイト</th><th>画像</th><th>備考</th></tr>
+    <tr><td>Adobe Stock</td><td>45 MB</td><td>—</td></tr>
+    <tr><td>Shutterstock</td><td>50 MB</td><td>PNG 非対応</td></tr>
+    <tr><td>Pixta</td><td>50 MB（PNG は 30 MB）</td><td>1回のアップロードで最大 50 枚</td></tr>
+  </table>
+  <p class="sub">※ 上限を超えるファイルは自動的に除外され、ログに表示されます。</p>
 </section>
 
 <div style="margin-top:60px; text-align:center; color:#8892b0; font-size:.85rem;">
   <p>Stock Auto Tagger &mdash; MIT License</p>
+  <p style="margin-top: 6px"><a href="https://github.com/imak-design/stock-auto-tagger">GitHub リポジトリ</a> ・ <a href="https://github.com/imak-design/stock-auto-tagger#readme">README（セットアップ手順）</a></p>
 </div>
 
 </div>
