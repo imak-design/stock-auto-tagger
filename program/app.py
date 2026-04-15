@@ -1789,7 +1789,7 @@ class StockTaggerApp:
 # ============================================================
 
 def _check_sessions_or_exit():
-    """有効サイトのセッションファイルを確認。未保存があれば警告して終了。"""
+    """有効サイトのセッションを確認。1つも未保存なら終了。一部欠けは警告のみで起動継続。"""
     from adobe_portal import SESSION_FILE as ADOBE_SESSION
     from shutterstock_portal import SESSION_FILE as SS_SESSION
     from pixta_portal import SESSION_FILE as PIXTA_SESSION
@@ -1801,17 +1801,33 @@ def _check_sessions_or_exit():
         ("Shutterstock", SS_SESSION, "shutterstock_login.py", "shutterstock"),
         ("Pixta", PIXTA_SESSION, "pixta_login.py", "pixta"),
     ]
-    missing = [(name, script) for name, sf, script, site in login_map if site in enabled_sites and not sf.exists()]
-    if missing:
-        lines = "\n".join(f"• {name}: python {script}" for name, script in missing)
+    enabled_targets = [(name, sf, script) for name, sf, script, site in login_map if site in enabled_sites]
+    missing = [(name, script) for name, sf, script in enabled_targets if not sf.exists()]
+    saved_count = sum(1 for _, sf, _ in enabled_targets if sf.exists())
+
+    if not enabled_targets:
+        return
+
+    if saved_count == 0:
+        lines = "\n".join(f"• {name}: python program/{script}" for name, script in missing)
         root = tk.Tk()
         root.withdraw()
         messagebox.showerror(
             "ログインセッションがありません",
-            f"以下のサイトのセッションが未保存です。\nコマンドプロンプトで以下を実行してからアプリを起動してください:\n\n{lines}"
+            f"有効なサイトのセッションが1つも保存されていません。\nコマンドプロンプトで以下のいずれかを実行してからアプリを起動してください:\n\n{lines}"
         )
         root.destroy()
         sys.exit(1)
+
+    if missing:
+        lines = "\n".join(f"• {name}: python program/{script}" for name, script in missing)
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showwarning(
+            "一部サイトのログインセッションが未保存",
+            f"以下のサイトはセッション未保存のため、アップロード時にスキップされます。\n利用する場合は下記コマンドでログインしてください:\n\n{lines}"
+        )
+        root.destroy()
 
 
 def main():

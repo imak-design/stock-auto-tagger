@@ -337,7 +337,7 @@ li { margin-bottom: 6px; }
 </div>
 
 <div class="alert" style="margin-top: 12px;">
-  ⚠️ <strong>アプリ起動前に各サイトへのログインが必須です。</strong>アプリは起動時に <code>enabled_sites</code> のセッションファイルをチェックし、未保存のサイトがあればエラーダイアログを表示して即終了します。ログインは <code>python program/&lt;site&gt;_login.py</code> を CLI で実行してセッションを保存してください（GUI 内からのログインは非対応）。詳細は <a href="https://github.com/imak-design/stock-auto-tagger#readme">README §6</a>。
+  ⚠️ <strong>アプリ起動前に最低 1 サイトへのログインが必要です。</strong>起動時に <code>enabled_sites</code> のセッションをチェックし、<strong>1 つも保存されていない場合はエラーで即終了</strong>、<strong>一部未保存なら警告ダイアログを表示して起動継続</strong>（未保存サイトはアップロード時に自動スキップ）します。ログインは <code>python program/&lt;site&gt;_login.py</code> を CLI で実行してください（GUI 内からのログインは Pixta reCAPTCHA 対策のため非対応）。詳細は <a href="https://github.com/imak-design/stock-auto-tagger#readme">README §6</a>。
 </div>
 
 <!-- TOC -->
@@ -761,8 +761,13 @@ variation/                    ← おまけ機能（工程0用）
     <tr><th>症状</th><th>原因</th><th>対処</th></tr>
     <tr>
       <td>起動時に「ログインセッションがありません」エラー</td>
-      <td>有効サイトのいずれかでログイン未実施</td>
-      <td>ダイアログに表示されたサイトについて <code>python program/&lt;site&gt;_login.py</code> を CLI で実行してからアプリ再起動</td>
+      <td>有効サイトのセッションが 1 つも保存されていない</td>
+      <td>ダイアログに表示されたいずれかのサイトで <code>python program/&lt;site&gt;_login.py</code> を CLI 実行してからアプリ再起動</td>
+    </tr>
+    <tr>
+      <td>起動時に「一部サイトのログインセッションが未保存」警告</td>
+      <td>一部サイトだけセッション保存済み</td>
+      <td>未保存サイトはアップロードでスキップされます。利用したい場合はダイアログ表示のコマンドでログイン</td>
     </tr>
     <tr>
       <td><code>Session expired</code> / 途中で停止</td>
