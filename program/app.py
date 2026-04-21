@@ -1639,7 +1639,12 @@ class StockTaggerApp:
         if self.last_results or self.last_photo_results or self.last_ai_results:
             move_results = list(self.last_results) + list(self.last_photo_results) + list(self.last_ai_results)
         else:
-            all_files = list(_Path(folder).iterdir())
+            folder_path = _Path(folder)
+            all_files = list(folder_path.iterdir())
+            for sub in ("AI", "Photo"):
+                sub_path = folder_path / sub
+                if sub_path.exists() and sub_path.is_dir():
+                    all_files.extend(sub_path.iterdir())
             move_results = [{"original_path": str(f)} for f in all_files if f.is_file() and f.suffix.lower() not in {".csv", ".json", ".txt"}]
 
         move_folder = self.last_folder if self.last_folder else folder
