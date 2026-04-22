@@ -1498,9 +1498,14 @@ def move_processed_files(results: list, input_folder: str, progress_callback=Non
 
     moved = 0
     errors = []
-    for r in results:
-        src = Path(r["original_path"])
-        if src.exists():
+    # 入力フォルダ直下 + AI/ + Photo/ の残存ファイルを全て移動
+    # (Vector/ は move_vector_subfolders、csv_output/ は別処理で対象外)
+    for root in [input_path, input_path / "AI", input_path / "Photo"]:
+        if not root.is_dir():
+            continue
+        for src in sorted(root.iterdir()):
+            if not src.is_file():
+                continue
             if move_to_destination(src, dest_folder):
                 moved += 1
                 if progress_callback:
