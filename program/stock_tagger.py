@@ -1364,15 +1364,29 @@ def process_folder(input_folder: str, api_key: str, progress_callback=None, stat
                 per_file_bg_prompts=per_file_bg
             )
 
-            # レスポンス数が足りない場合はエラー扱い
+            # レスポンス数が足りない場合は不足分を単発リトライ
             if len(batch_results) < len(batch):
+                missing = len(batch) - len(batch_results)
+                if progress_callback:
+                    progress_callback(f"  [!] バッチレスポンス {len(batch_results)}/{len(batch)} 件 → 不足{missing}件を単発リトライ")
                 for j in range(len(batch_results), len(batch)):
-                    fp, is_ai, is_photo = batch[j]
-                    errors.append({"filename": fp.name, "error": "バッチレスポンスに結果なし"})
+                    fp, _, _ = batch[j]
+                    try:
+                        if progress_callback:
+                            progress_callback(f"  単発リトライ: {fp.name}")
+                        single = analyze_image(fp, api_key)
+                        batch_results.append(single)
+                    except Exception as retry_err:
+                        batch_results.append(None)
+                        errors.append({"filename": fp.name, "error": f"単発リトライ失敗: {retry_err}"})
+                        if progress_callback:
+                            progress_callback(f"  [NG] 単発リトライ失敗: {fp.name} - {retry_err}")
 
             for j, metadata in enumerate(batch_results):
                 if j >= len(batch):
                     break
+                if metadata is None:
+                    continue
                 fp, is_ai, is_photo = batch[j]
                 metadata["filename"] = fp.name
                 metadata["file_type"] = "image"
@@ -1623,13 +1637,27 @@ def process_vector_files(input_folder: str, api_key: str, progress_callback=None
             )
 
             if len(batch_results) < len(batch):
+                missing = len(batch) - len(batch_results)
+                if progress_callback:
+                    progress_callback(f"  [!] バッチレスポンス {len(batch_results)}/{len(batch)} 件 → 不足{missing}件を単発リトライ")
                 for j in range(len(batch_results), len(batch)):
-                    subfolder, _, _ = batch[j]
-                    errors.append({"filename": subfolder.name, "error": "バッチレスポンスに結果なし"})
+                    subfolder, png_path, _ = batch[j]
+                    try:
+                        if progress_callback:
+                            progress_callback(f"  単発リトライ: {png_path.name}")
+                        single = analyze_image(png_path, api_key)
+                        batch_results.append(single)
+                    except Exception as retry_err:
+                        batch_results.append(None)
+                        errors.append({"filename": subfolder.name, "error": f"単発リトライ失敗: {retry_err}"})
+                        if progress_callback:
+                            progress_callback(f"  [NG] 単発リトライ失敗: {png_path.name} - {retry_err}")
 
             for j, metadata in enumerate(batch_results):
                 if j >= len(batch):
                     break
+                if metadata is None:
+                    continue
                 subfolder, png_path, eps_path = batch[j]
 
                 # ベクタータグを追加

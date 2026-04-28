@@ -865,7 +865,7 @@ def _upload_metadata_csv(page, csv_path: Path, log) -> int:
     for attempt in range(6):
         all_ok = True
         for item in content:
-            title = item.get("title", "").strip()
+            title = (item.get("title") or "").strip()
             keywords = item.get("keywords") or []
             if not title or not keywords:
                 all_ok = False
@@ -883,7 +883,7 @@ def _upload_metadata_csv(page, csv_path: Path, log) -> int:
     else:
         # 反映されなかったファイルを警告
         for item in content:
-            title = item.get("title", "").strip()
+            title = (item.get("title") or "").strip()
             keywords = item.get("keywords") or []
             name = item.get("originalName", "?")
             if not title:
