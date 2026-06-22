@@ -42,6 +42,23 @@ def _select_all(page, log):
     return len(cbs)
 
 
+def _ensure_all_selected(page, log):
+    """未選択のチェックボックスのみクリック（既選択は維持）"""
+    cbs = page.locator('input[type="checkbox"]').all()
+    clicked = 0
+    for cb in cbs:
+        try:
+            if not cb.is_checked():
+                cb.click(force=True)
+                time.sleep(0.2)
+                clicked += 1
+        except Exception:
+            pass
+    log(f"全選択確認: {len(cbs)}件中 {clicked}件クリック")
+    time.sleep(2)
+    return len(cbs)
+
+
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
                           files: list = None, expected_count: int = 0, skip_submit: bool = False,
                           no_wait: bool = False, playwright_instance=None):
@@ -98,15 +115,22 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # ============================================================
             if files:
                 log(f"アップロード開始: {len(files)}件...")
-                upload_btn = page.locator('button[data-testid="uploadButton"]')
+                # アップロードボタンでドロップゾーンのモーダルを開く
+                upload_btn = page.locator('button[data-testid="uploadButton"]').first
                 try:
-                    upload_btn.wait_for(state="visible", timeout=10000)
+                    upload_btn.wait_for(state="visible", timeout=15000)
                 except PWTimeout:
                     raise RuntimeError("アップロードボタンが見つかりません")
+                upload_btn.click()
 
-                with page.expect_file_chooser() as fc_info:
-                    upload_btn.click()
-                fc_info.value.set_files([str(f) for f in files])
+                # Shutterstock は native file chooser ではなく dropzone 方式に変更されたため、
+                # dropzone 内の input[type=file] へ直接ファイルをセットする
+                file_input = page.locator('[data-testid="dropzone-container"] input[type="file"]').first
+                try:
+                    file_input.wait_for(state="attached", timeout=10000)
+                except PWTimeout:
+                    file_input = page.locator('input[type="file"]').last  # フォールバック
+                file_input.set_input_files([str(f) for f in files])
                 log(f"Files set: {[Path(f).name for f in files]}")
 
                 log("アップロード完了待機中（60秒）...")
@@ -187,26 +211,19 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             time.sleep(5)
             _close_popups(page)
 
-            # 再度全選択 → description確認（空なら10秒待ちリロード→再選択）
-            for attempt in range(3):
-                _select_all(page, log)
-                desc_inputs = page.locator(
-                    'input[name="description"], textarea[name="description"], [data-testid="description-input"]'
-                ).all()
-                empty_count = sum(
-                    1 for inp in desc_inputs
-                    if not inp.input_value(timeout=2000).strip()
-                )
-                if empty_count == 0:
-                    log("[OK] description反映確認完了")
-                    break
-                log(f"[!] descriptionが空の欄あり({empty_count}件)。10秒待ちリロード... ({attempt + 1}/3)")
-                time.sleep(10)
-                page.reload(wait_until="domcontentloaded", timeout=30000)
-                time.sleep(5)
-                _close_popups(page)
+            # 全選択 → CSVメタデータ反映を確認（keywordチップが付けば適用済み）
+            # ※ ページreloadは選択を解除し、送信ボタン（選択時のみ表示）を消してしまうため行わない
+            _select_all(page, log)
+            time.sleep(2)
+            kw_chips = page.locator('[data-testid^="selected-keyword-"]').count()
+            if kw_chips > 0:
+                log(f"[OK] CSVメタデータ反映確認（keyword {kw_chips}件）")
             else:
-                log("[!] description確認できず。続行します...")
+                log("[!] keyword未検出。10秒待って再選択し再確認...")
+                time.sleep(10)
+                _ensure_all_selected(page, log)
+                kw_chips = page.locator('[data-testid^="selected-keyword-"]').count()
+                log(f"[!] 再確認: keyword {kw_chips}件")
 
             log("CSV適用完了")
 
@@ -217,11 +234,14 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 log("[テストモード] 審査提出ボタンの手前で停止します。ブラウザで手動操作してください。")
             else:
                 log("画像: 審査提出中...")
+                # 送信ボタンは素材が選択されている時のみ表示されるため、直前に再選択
+                _ensure_all_selected(page, log)
                 submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
                 try:
-                    submit_btn.wait_for(state="visible", timeout=8000)
+                    submit_btn.wait_for(state="visible", timeout=10000)
                     submit_btn.click()
                     time.sleep(4)
+                    log("[OK] 画像: 送信ボタンクリック完了")
                 except PWTimeout:
                     log("[NG] 提出ボタンが見つかりません")
 
