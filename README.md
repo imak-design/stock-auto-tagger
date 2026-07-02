@@ -105,7 +105,8 @@ cp config.example.json config.json
   "input_folder": "input",
   "variation_folder": "variation",
   "backup_folder": "",
-  "enabled_sites": ["adobe", "shutterstock", "pixta"]
+  "enabled_sites": ["adobe", "shutterstock", "pixta"],
+  "test_mode": true
 }
 ```
 
@@ -129,6 +130,7 @@ cp config.example.json config.json
 
 - 通常のイラスト・動画素材は `input_folder` 直下にそのまま入れてください
 - 必要なフォルダだけ作れば OK です（全部作る必要はありません）
+- 工程0（リネーム）を使う場合は、`variation/` の下に `01/`〜`10/`（動画は `variation/movie/01/`〜）のサブフォルダを使う分だけ手動で作成してください
 - Vector フォルダ内は素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください（例: `Vector/260405_crown_vector/` に `.eps` と `.png`）
 
 ### 5. Gemini API キーの設定
@@ -295,8 +297,8 @@ stock-auto-tagger/
 │   └── csv_output/           ← CSV 自動出力先（自動作成）
 │
 ├── variation/                ← バリエーション素材（工程0用、任意）
-│   ├── 01/ 〜 10/            ← 画像バリエーション
-│   └── movie/01/ 〜 10/      ← 動画バリエーション
+│   ├── 01/ 〜 10/            ← 画像バリエーション（使う分だけ手動で作成）
+│   └── movie/01/ 〜 10/      ← 動画バリエーション（使う分だけ手動で作成）
 │
 ├── program/                  ← Python本体（OS非依存）
 │   ├── app.py / stock_tagger.py / paths.py

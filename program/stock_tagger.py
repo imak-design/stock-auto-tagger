@@ -105,20 +105,42 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
+
+def _gemini_urlopen_retry(req, attempts: int = 4):
+    """一過性のネットワークエラー・429/5xx を指数バックオフで再試行する urlopen"""
+    import urllib.request
+    import urllib.error
+
+    for attempt in range(attempts):
+        try:
+            return urllib.request.urlopen(req)
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503) and attempt < attempts - 1:
+                time.sleep(min(2 ** attempt * 2, 30))
+                continue
+            raise
+        except urllib.error.URLError:
+            if attempt < attempts - 1:
+                time.sleep(min(2 ** attempt * 2, 30))
+                continue
+            raise
+
+
 def call_gemini_api(api_key: str, payload: dict, model: str = None) -> str:
     """Gemini APIを直接呼び出してテキストを返す（429/5xx時は指数バックオフでリトライ）"""
     import urllib.request
     import urllib.error
 
     use_model = model or GEMINI_MODEL
-    url = f"{GEMINI_API_BASE}/{use_model}:generateContent?key={api_key}"
+    # APIキーはURLに含めず、ヘッダーで渡す（ログ等へのURL露出でキーが漏れるのを防ぐ）
+    url = f"{GEMINI_API_BASE}/{use_model}:generateContent"
     data = json.dumps(payload).encode("utf-8")
 
     for attempt in range(7):
         req = urllib.request.Request(
             url,
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
             method="POST"
         )
         try:
@@ -148,18 +170,19 @@ def upload_file_to_gemini(file_path: Path, api_key: str, progress_callback=None,
 
     file_size = file_path.stat().st_size
 
-    start_url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={api_key}"
+    start_url = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     start_headers = {
         "X-Goog-Upload-Protocol": "resumable",
         "X-Goog-Upload-Command": "start",
         "X-Goog-Upload-Header-Content-Length": str(file_size),
         "X-Goog-Upload-Header-Content-Type": mime_type,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key
     }
     start_body = json.dumps({"file": {"display_name": file_path.name}}).encode("utf-8")
 
     req = urllib.request.Request(start_url, data=start_body, headers=start_headers, method="POST")
-    with urllib.request.urlopen(req) as res:
+    with _gemini_urlopen_retry(req) as res:
         upload_url = res.headers.get("X-Goog-Upload-URL")
 
     with open(file_path, "rb") as f:
@@ -175,7 +198,7 @@ def upload_file_to_gemini(file_path: Path, api_key: str, progress_callback=None,
         },
         method="POST"
     )
-    with urllib.request.urlopen(upload_req) as res:
+    with _gemini_urlopen_retry(upload_req) as res:
         file_info = json.loads(res.read().decode("utf-8"))
 
     file_uri = file_info["file"]["uri"]
@@ -191,9 +214,9 @@ def upload_file_to_gemini(file_path: Path, api_key: str, progress_callback=None,
             if progress_callback:
                 progress_callback(f"  動画処理中... ({waited}秒)")
 
-            status_url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
-            status_req = urllib.request.Request(status_url)
-            with urllib.request.urlopen(status_req) as res:
+            status_url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}"
+            status_req = urllib.request.Request(status_url, headers={"x-goog-api-key": api_key})
+            with _gemini_urlopen_retry(status_req) as res:
                 status_info = json.loads(res.read().decode("utf-8"))
 
             state = status_info.get("state", "")
@@ -210,11 +233,11 @@ def upload_file_to_gemini(file_path: Path, api_key: str, progress_callback=None,
 def delete_gemini_file(file_name: str, api_key: str):
     """アップロードしたファイルを削除"""
     import urllib.request
-    url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
-    req = urllib.request.Request(url, method="DELETE")
+    url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}"
+    req = urllib.request.Request(url, headers={"x-goog-api-key": api_key}, method="DELETE")
     try:
         urllib.request.urlopen(req)
-    except:
+    except Exception:
         pass
 
 
@@ -665,7 +688,9 @@ def filter_keywords(keywords: list, max_count: int = 50) -> list:
 # ============================================================
 
 def _make_xmp_string(title: str, keywords: list) -> str:
-    keywords_xml = "\n          ".join(f"<rdf:li>{kw}</rdf:li>" for kw in keywords)
+    from xml.sax.saxutils import escape
+    title = escape(title)
+    keywords_xml = "\n          ".join(f"<rdf:li>{escape(kw)}</rdf:li>" for kw in keywords)
     return (
         '<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
         '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
@@ -1012,72 +1037,17 @@ def get_upload_targets(folder: Path, site: str) -> list:
 
 
 # ============================================================
-# Shutterstock FTPS アップロード
-# ============================================================
-
-SHUTTERSTOCK_FTPS_HOST = "ftps.shutterstock.com"
-
-def upload_to_shutterstock(input_folder: str, ftp_user: str, ftp_pass: str,
-                            progress_callback=None) -> dict:
-    """Shutterstock FTPSへ画像・動画をアップロードする"""
-    import ftplib
-
-    input_path = Path(input_folder)
-    targets = get_upload_targets(input_path, "shutterstock")
-
-    if not targets:
-        if progress_callback:
-            progress_callback("Shutterstockにアップロード対象のファイルがありません（JPG・動画のみ対応）")
-        return {"uploaded": 0, "errors": [], "skipped": 0}
-
-    uploaded = 0
-    skipped = 0
-    errors = []
-
-    if progress_callback:
-        progress_callback(f"Shutterstock FTPSに接続中... ({SHUTTERSTOCK_FTPS_HOST})")
-
-    try:
-        ftp = ftplib.FTP_TLS()
-        ftp.connect(SHUTTERSTOCK_FTPS_HOST, 21, timeout=30)
-        ftp.auth()
-        ftp.login(ftp_user, ftp_pass)
-        ftp.prot_p()
-
-        if progress_callback:
-            progress_callback(f"接続完了。{len(targets)}ファイルをアップロードします")
-
-        for i, file_path in enumerate(targets, 1):
-            if progress_callback:
-                progress_callback(f"[{i}/{len(targets)}] アップロード中: {file_path.name}")
-            try:
-                with open(file_path, "rb") as f:
-                    ftp.storbinary(f"STOR {file_path.name}", f)
-                uploaded += 1
-                if progress_callback:
-                    progress_callback(f"  [OK] {file_path.name}")
-            except Exception as e:
-                errors.append({"filename": file_path.name, "error": str(e)})
-                if progress_callback:
-                    progress_callback(f"  [NG] {file_path.name}: {e}")
-
-        ftp.quit()
-
-    except Exception as e:
-        raise ConnectionError(f"FTPS接続エラー: {e}")
-
-    if progress_callback:
-        progress_callback(f"\nShutterstock アップロード完了: {uploaded}件 / エラー: {len(errors)}件")
-
-    return {"uploaded": uploaded, "errors": errors, "skipped": skipped}
-
-
-# ============================================================
 # リネーム処理
 # ============================================================
 
 RENAME_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 RENAME_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".wmv", ".webm"}
+
+
+def _sanitize_name_part(s: str) -> str:
+    """AI応答をファイル名部品に使う前に英小文字・数字のみへ正規化する
+    （パス区切り文字等の混入によるパストラバーサルを防ぐ）"""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
 def _rename_get_keyword_and_colors(api_key: str, images_data: list) -> dict:
@@ -1105,9 +1075,9 @@ def _rename_get_keyword_and_colors(api_key: str, images_data: list) -> dict:
     for line in response.split("\n"):
         line = line.strip()
         if line.lower().startswith("keyword:"):
-            keyword = line.split(":", 1)[1].strip().lower()
+            keyword = _sanitize_name_part(line.split(":", 1)[1].strip())
         elif line.lower().startswith("colors:"):
-            colors = [c.strip().lower() for c in line.split(":", 1)[1].split(",")]
+            colors = [_sanitize_name_part(c.strip()) for c in line.split(":", 1)[1].split(",")]
     return {"keyword": keyword, "colors": colors}
 
 
@@ -1120,7 +1090,7 @@ def _rename_video_keyword(api_key: str, file_uri: str, mime_type: str) -> str:
             "Reply with ONLY the keyword."
         )}
     ]
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
+    return _sanitize_name_part(call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip())
 
 
 def _rename_video_color(api_key: str, file_uri: str, mime_type: str) -> str:
@@ -1134,7 +1104,7 @@ def _rename_video_color(api_key: str, file_uri: str, mime_type: str) -> str:
             "Reply with ONLY the color name."
         )}
     ]
-    return call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip().lower()
+    return _sanitize_name_part(call_gemini_api(api_key, {"contents": [{"parts": parts}]}, model=GEMINI_MODEL_LITE).strip())
 
 
 def rename_variation_folders(api_key: str, output_folder: str, variation_base: str = None,

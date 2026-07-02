@@ -1,5 +1,5 @@
-playwright
-Pillow
-numpy
-python-dotenv
-send2trash
+playwright>=1.50,<2
+Pillow>=10,<13
+numpy>=1.26,<3
+python-dotenv>=1,<2
+send2trash>=1.8,<3

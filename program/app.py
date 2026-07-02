@@ -102,7 +102,7 @@ load_dotenv(ENV_FILE)
 # メイン処理をインポート
 from stock_tagger import (
     process_folder, move_processed_files, rename_variation_folders,
-    upload_to_shutterstock, get_upload_targets,
+    get_upload_targets,
     process_vector_files, move_vector_subfolders,
     get_vector_eps_files, prepare_vector_zips_with_xmp,
     estimate_api_requests, validate_upload_files,
@@ -174,7 +174,18 @@ class StockTaggerApp:
         self._setup_styles()
         self._build_ui()
 
+    def _release_shared_pw(self):
+        """テストモードで開いたままの共有Playwrightインスタンスを解放する"""
+        _pw = getattr(self, "_shared_pw", None)
+        if _pw is not None:
+            try:
+                _pw.stop()
+            except Exception:
+                pass
+            self._shared_pw = None
+
     def _on_close(self):
+        self._release_shared_pw()
         self.root.destroy()
         os._exit(0)
 
@@ -514,8 +525,7 @@ class StockTaggerApp:
         # APIキー読み込み状況をログに表示
         api_key = self.config.get("api_key", "")
         if api_key:
-            masked = api_key[:8] + "..." + api_key[-4:]
-            self._log(f"✓ APIキー読み込み済み: {masked}", "success")
+            self._log("✓ APIキー読み込み済み", "success")
         else:
             env_path = ENV_DIR / ".env"
             self._log(f"✗ APIキーが見つかりません。{env_path} にGEMINI_API_KEYを設定してください。", "error")
@@ -892,7 +902,7 @@ class StockTaggerApp:
             self.root.after(0, on_error)
 
     def _run_pipeline_uploads(self, folder: str, api_key: str = ""):
-        """工程0フルパイプライン: Adobe SFTP+ポータル → Shutterstock FTPS+ポータル → Pixta画像 → Pixta動画 → ファイル移動"""
+        """工程0フルパイプライン: Adobe ポータル → Shutterstock ポータル → Pixta画像 → Pixta動画 → ファイル移動"""
         from pathlib import Path as _Path
         from adobe_portal import SESSION_FILE as ADOBE_SESSION
         from shutterstock_portal import run_portal_automation as ss_portal, SESSION_FILE as SS_SESSION
@@ -907,10 +917,13 @@ class StockTaggerApp:
         _pipeline_start = _time.time()
 
         # テストモード時は共有Playwrightインスタンスを使用（ブラウザを開いたまま維持）
+        # 前回実行分の共有インスタンスが残っていれば先に解放する（ドライバプロセスのリーク防止）
+        self._release_shared_pw()
         _pw = None
         if self.test_mode:
             from playwright.sync_api import sync_playwright
             _pw = sync_playwright().start()
+            self._shared_pw = _pw
 
         folder_path = _Path(folder)
         csv_folder = folder_path / "csv_output"

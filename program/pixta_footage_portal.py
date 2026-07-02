@@ -229,6 +229,7 @@ def run_footage_upload(
             # 各動画にタイトルとタグを入力（ファイル名で対応付け）
             import subprocess as _subprocess
             import platform as _platform
+            import base64 as _base64
             _is_mac = _platform.system() == "Darwin"
 
             # metadataをファイル名（stem, 小文字）→メタ のdictに変換
@@ -289,8 +290,15 @@ def run_footage_upload(
                                 check=True,
                             )
                         else:
+                            # タグ文字列は AI 生成のためコマンドラインに直接埋め込まない
+                            # (Base64 経由で渡してインジェクションと文字化けを防ぐ)
+                            _b64 = _base64.b64encode(tag_str.encode("utf-8")).decode("ascii")
                             _subprocess.run(
-                                ["powershell", "-command", f"Set-Clipboard -Value '{tag_str}'"],
+                                [
+                                    "powershell", "-NoProfile", "-Command",
+                                    "Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString("
+                                    f"[Convert]::FromBase64String('{_b64}')))",
+                                ],
                                 check=True,
                             )
                         tag_inp = page.locator(f'[id="{item_id}-input-tags"]')

@@ -1,10 +1,13 @@
 # Secrets & sessions
 config.json
-.env
+.env*
 *_session.json
+sessions/
+profiles/
 
 # Chrome profiles
 chrome_profile/
+adobe_profile/
 shutterstock_profile/
 pixta_profile/
 
@@ -24,7 +27,7 @@ Thumbs.db
 desktop.ini
 
 # Generated shortcut (created by windows/アプリ化.bat)
-StockAutoTagger.lnk
+*.lnk
 
 # IDE
 .vscode/
