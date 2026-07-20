@@ -992,6 +992,11 @@ class StockTaggerApp:
                     log("    ファイルはアップロード済みです。開いているブラウザで手動提出してください。")
                     log("    このまま次のサイトの処理に進みます。")
                     manual_services.append(("Adobe Stock", reason))
+                elif portal_result.get("errors"):
+                    log(f"[NG] Adobe 提出エラー: {'; '.join(portal_result['errors'])}")
+                    failed_services.append("Adobe Stock")
+                elif self.test_mode:
+                    log(f"[OK] Adobe アップロード完了（テストモード・審査提出は手動）: メタデータ適用 {portal_result.get('metadata_applied', 0)}件")
                 else:
                     log(f"[OK] Adobe ポータル提出完了: {portal_result['submitted']}件")
                 self._uploaded_sites.add("adobe")
@@ -1362,6 +1367,10 @@ class StockTaggerApp:
                         manual_reason = portal_result.get("manual_reason", "理由不明")
                         log(f"[!] 審査提出が完了していません: {manual_reason}")
                         log("    ファイルはアップロード済みです。ブラウザは開いたままにします。")
+                    elif portal_result.get("errors"):
+                        raise RuntimeError("Adobe 提出エラー: " + "; ".join(portal_result["errors"]))
+                    elif self.test_mode:
+                        log(f"[OK] アップロード完了（テストモード・審査提出は手動）: メタデータ適用 {portal_result.get('metadata_applied', 0)}件")
                     else:
                         log(f"[OK] ポータル提出完了: {portal_result['submitted']}件")
 

@@ -9,6 +9,7 @@ Adobe Stock コントリビューターポータル 自動化
 
 import csv
 import time
+from collections import Counter
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from paths import ADOBE_SESSION as SESSION_FILE, ADOBE_PROFILE
@@ -254,7 +255,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                             errors.append(f"Adobe 審査提出: {manual_reason}")
                 else:
                     # テストモード: 全選択だけして審査登録ボタン手前で停止
+                    # 審査提出はしていないので submitted はメタデータ件数と混同させない
                     _keep_open = True
+                    submitted = 0
                     log("\n>> [テストモード] 全ファイルを選択して停止します...")
                     select_all = page.locator('input[type=checkbox]').first
                     try:
@@ -860,8 +863,13 @@ def _upload_metadata_csv(page, csv_path: Path, log) -> int:
         if dialogs.count() > 0:
             dialog_text = dialogs.first.inner_text()[:200]
         log(f"[!] ダイアログがタイムアウト: {dialog_text}")
-        page.locator('[data-t="csv-modal-close"]').click()
-        return -1
+        try:
+            page.locator('[data-t="csv-modal-close"]').click()
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"CSV アップロードが完了しませんでした（ダイアログが閉じません）: {dialog_text}"
+        )
 
     log("[OK] CSV アップロード完了")
 
@@ -928,6 +936,9 @@ _CHALLENGE_FRAME_HINTS = (
     "hcaptcha", "recaptcha", "arkoselabs", "funcaptcha",
     "captcha", "geetest", "perimeterx", "imperva",
 )
+# 正常時も常駐する不可視のCAPTCHA部品（invisible reCAPTCHA バッジ、
+# hCaptcha のチェックボックス枠等）はチャレンジ本体ではないため無視する
+_CHALLENGE_FRAME_IGNORE = ("anchor", "frame=checkbox", "invisible")
 _CHALLENGE_DOM_SELECTORS = (
     '[data-t="image-challenge-input"]',
     '[class*="challenge"] input',
@@ -945,10 +956,21 @@ def _detect_human_challenge(page):
     検出したら人間に引き渡すための説明文を返す。未検出なら None。
     """
     # iframe（hCaptcha/reCAPTCHA 等は iframe 内に出るため page.locator では届かない）
+    # URL 一致だけだと常駐の不可視部品まで拾うため、実際に画面上に
+    # 見えている大きさ（バウンディングボックス）を持つ iframe のみ検出する
     try:
         for fr in page.frames:
             url = (fr.url or "").lower()
-            if any(h in url for h in _CHALLENGE_FRAME_HINTS):
+            if not any(h in url for h in _CHALLENGE_FRAME_HINTS):
+                continue
+            if any(ig in url for ig in _CHALLENGE_FRAME_IGNORE):
+                continue
+            try:
+                el = fr.frame_element()
+                box = el.bounding_box()
+            except Exception:
+                continue
+            if box and box["width"] >= 80 and box["height"] >= 80:
                 return f"画像選択CAPTCHA（iframe: {fr.url[:100]}）"
     except Exception:
         pass
@@ -964,13 +986,14 @@ def _detect_human_challenge(page):
     return None
 
 
-def _verify_submission(page, before_names: set, log, rounds: int = 24):
+def _verify_submission(page, before_counts, log, rounds: int = 60):
     """
     審査提出が実際に完了したかを検証する。
     提出済みファイルは uploads 一覧から消えるため、対象が消えたことを成功条件とする。
-    戻り値: (ok: bool, remaining: set, challenge: str|None)
+    同名ファイルが複数あっても件数で追跡できるよう Counter で比較する。
+    戻り値: (ok: bool, remaining: Counter, challenge: str|None)
     """
-    remaining = set(before_names)
+    remaining = Counter(before_counts)
     for i in range(rounds):
         challenge = _detect_human_challenge(page)
         if challenge:
@@ -979,10 +1002,10 @@ def _verify_submission(page, before_names: set, log, rounds: int = 24):
         try:
             data = page.evaluate("() => window.__react_context__")
             content = data.get("reduxState", {}).get("content", []) or []
-            now_names = {item.get("originalName", "") for item in content}
-            remaining = before_names & now_names
+            now_counts = Counter(item.get("originalName", "") for item in content)
+            remaining = before_counts & now_counts
             if not remaining:
-                return True, set(), None
+                return True, Counter(), None
         except Exception:
             pass
 
@@ -994,6 +1017,8 @@ def _verify_submission(page, before_names: set, log, rounds: int = 24):
                 time.sleep(3)
             except Exception:
                 pass
+        if i % 6 == 5:
+            log(f"  提出反映を確認中... 残り{sum(remaining.values())}件")
 
     return False, remaining, None
 
@@ -1014,14 +1039,14 @@ def _submit_for_review(page, log):
     """
     log("\n>> 審査に登録...")
 
-    # 提出対象のファイル名を控える（提出後の検証に使用）
+    # 提出対象のファイル名を控える（提出後の検証に使用。同名ファイルも件数で追跡）
     try:
         data = page.evaluate("() => window.__react_context__")
         before_content = data.get("reduxState", {}).get("content", []) or []
-        before_names = {item.get("originalName", "") for item in before_content}
+        before_counts = Counter(item.get("originalName", "") for item in before_content)
     except Exception:
-        before_names = set()
-    target_count = len(before_names)
+        before_counts = Counter()
+    target_count = sum(before_counts.values())
 
     def _fail(reason, manual=False):
         log(f"[!] 審査提出未完了: {reason}")
@@ -1044,8 +1069,13 @@ def _submit_for_review(page, log):
 
     # --- Step B: 審査登録ボタン ---
     submit_btn = page.locator('[data-t="submit-moderation-button"]').first
-    if not submit_btn.count() or not submit_btn.is_visible():
-        return _fail("審査登録ボタンが見つかりません")
+    try:
+        submit_btn.wait_for(state="visible", timeout=10000)
+    except Exception:
+        challenge = _detect_human_challenge(page)
+        if challenge:
+            return _fail(f"{challenge}が表示されたため続行できません", manual=True)
+        return _fail("審査登録ボタンが見つかりません。画面の状態を確認してください", manual=True)
     log(f"審査登録ボタン: {submit_btn.inner_text().strip()}")
     submit_btn.click()
     time.sleep(2)
@@ -1079,15 +1109,17 @@ def _submit_for_review(page, log):
         challenge = _detect_human_challenge(page)
         if challenge:
             return _fail(f"{challenge}が表示されたため続行できません", manual=True)
-        return _fail("続行ボタンが有効になりませんでした")
+        return _fail("続行ボタンが有効になりませんでした。画面の状態を確認してください", manual=True)
 
     # --- Step E: サムネイル確認ダイアログ -> 全選択確認 -> 審査へ ---
     send_btn = page.locator('[data-t="send-moderation-button"]').first
-    if not send_btn.count() or not send_btn.is_visible():
+    try:
+        send_btn.wait_for(state="visible", timeout=10000)
+    except Exception:
         challenge = _detect_human_challenge(page)
         if challenge:
             return _fail(f"{challenge}が表示されたため続行できません", manual=True)
-        return _fail("サムネイル確認ダイアログが見つかりません")
+        return _fail("サムネイル確認ダイアログが見つかりません。画面の状態を確認してください", manual=True)
 
     # ダイアログ内の全選択チェックボックス（最初のものが「全て選択」）
     try:
@@ -1108,7 +1140,7 @@ def _submit_for_review(page, log):
     # ここまでのクリックが通っても、人間性チェック（猫画像の選択 / 5ワード入力）が
     # 割り込むと実際には提出されない。クリックできた＝提出できた、とは扱わない。
     log("提出結果を確認しています...")
-    ok, remaining, challenge = _verify_submission(page, before_names, log)
+    ok, remaining, challenge = _verify_submission(page, before_counts, log)
 
     if challenge:
         return _fail(
@@ -1119,7 +1151,8 @@ def _submit_for_review(page, log):
         for name in sorted(remaining):
             log(f"  [!] 未提出のまま残っています: {name}")
         return _fail(
-            f"提出を確認できませんでした（{len(remaining)}/{target_count}件が一覧に残存）",
+            f"提出を確認できませんでした（{sum(remaining.values())}/{target_count}件が一覧に残存。"
+            "反映が遅れているだけの可能性もあるため、ブラウザの画面で状況を確認してください）",
             manual=True,
         )
 
