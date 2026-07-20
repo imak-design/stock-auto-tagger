@@ -986,25 +986,62 @@ def _detect_human_challenge(page):
     return None
 
 
-def _verify_submission(page, before_counts, log, rounds: int = 60):
+REVIEW_URL = "https://contributor.stock.adobe.com/jp/uploads/review"
+
+
+def _check_review_page(context, before_counts):
+    """
+    「審査中」一覧（/uploads/review）を別タブで開き、提出対象のうち
+    審査中に載っているファイルを Counter で返す。取得できなければ None。
+    読み取りのみでクリック等の操作は行わない。
+    """
+    check_page = context.new_page()
+    try:
+        check_page.goto(REVIEW_URL, wait_until="domcontentloaded", timeout=30000)
+        time.sleep(4)
+        data = check_page.evaluate("() => window.__react_context__") or {}
+        content = (data.get("reduxState") or {}).get("content", []) or []
+        review_counts = Counter(item.get("originalName", "") for item in content)
+        return before_counts & review_counts
+    except Exception:
+        return None
+    finally:
+        try:
+            check_page.close()
+        except Exception:
+            pass
+
+
+def _verify_submission(page, before_counts, log, rounds: int = 30):
     """
     審査提出が実際に完了したかを検証する。
-    提出済みファイルは uploads 一覧から消えるため、対象が消えたことを成功条件とする。
+    主判定: 「審査中」一覧に対象ファイル名が現れたら提出済み。
+    （提出後も uploads 一覧にしばらく残ることがあるため、消えたかどうかでは判定しない）
+    補助判定: uploads 一覧から対象が全て消えた場合も提出済みとみなす。
     同名ファイルが複数あっても件数で追跡できるよう Counter で比較する。
     戻り値: (ok: bool, remaining: Counter, challenge: str|None)
     """
     remaining = Counter(before_counts)
+    total = sum(before_counts.values())
     for i in range(rounds):
         challenge = _detect_human_challenge(page)
         if challenge:
             return False, remaining, challenge
 
+        # --- 主判定: 審査中一覧に対象ファイルが載ったか（別タブで確認） ---
+        in_review = _check_review_page(page.context, before_counts)
+        if in_review is not None:
+            remaining = before_counts - in_review
+            if not remaining:
+                log(f"  審査中一覧で提出を確認: {total}/{total}件")
+                return True, Counter(), None
+
+        # --- 補助判定: uploads 一覧から対象が全て消えたか ---
         try:
             data = page.evaluate("() => window.__react_context__")
             content = data.get("reduxState", {}).get("content", []) or []
             now_counts = Counter(item.get("originalName", "") for item in content)
-            remaining = before_counts & now_counts
-            if not remaining:
+            if not (before_counts & now_counts):
                 return True, Counter(), None
         except Exception:
             pass
@@ -1017,8 +1054,8 @@ def _verify_submission(page, before_counts, log, rounds: int = 60):
                 time.sleep(3)
             except Exception:
                 pass
-        if i % 6 == 5:
-            log(f"  提出反映を確認中... 残り{sum(remaining.values())}件")
+        if i % 4 == 1:
+            log(f"  提出反映を確認中... 審査中で未確認 {sum(remaining.values())}/{total}件")
 
     return False, remaining, None
 
@@ -1149,10 +1186,10 @@ def _submit_for_review(page, log):
 
     if not ok:
         for name in sorted(remaining):
-            log(f"  [!] 未提出のまま残っています: {name}")
+            log(f"  [!] 審査中一覧で確認できていません: {name}")
         return _fail(
-            f"提出を確認できませんでした（{sum(remaining.values())}/{target_count}件が一覧に残存。"
-            "反映が遅れているだけの可能性もあるため、ブラウザの画面で状況を確認してください）",
+            f"提出を確認できませんでした（{sum(remaining.values())}/{target_count}件が審査中一覧で未確認。"
+            "反映が遅れているだけの可能性もあるため、ポータルの「審査中」ページを確認してください）",
             manual=True,
         )
 

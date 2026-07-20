@@ -184,6 +184,33 @@ class StockTaggerApp:
                 pass
             self._shared_pw = None
 
+    def _call_portal_isolated(self, fn, **kwargs):
+        """ポータル自動化を専用スレッドで実行し、sync Playwright のループを隔離する。
+
+        Adobe が要手動対応（CAPTCHA 等）でブラウザを開いたまま返ると、
+        そのスレッドに asyncio ループが残り、同一スレッドで次のサイトが
+        sync_playwright().start() を呼ぶと "Sync API inside the asyncio loop"
+        で必ず失敗する。サイトごとにスレッドを分けて連鎖を断つ。
+        テストモードの共有インスタンス（playwright_instance 指定時）は
+        スレッドを跨げないため、その場合は同一スレッドでそのまま実行する。
+        """
+        if kwargs.get("playwright_instance") is not None:
+            return fn(**kwargs)
+        result = {}
+
+        def _target():
+            try:
+                result["value"] = fn(**kwargs)
+            except BaseException as e:
+                result["error"] = e
+
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+        t.join()
+        if "error" in result:
+            raise result["error"]
+        return result["value"]
+
     def _on_close(self):
         self._release_shared_pw()
         self.root.destroy()
@@ -976,7 +1003,8 @@ class StockTaggerApp:
                     details.append(f"写真{len(photo_files)}")
                 log(f"  内訳: {' / '.join(details)}")
 
-                portal_result = run_portal_automation(
+                portal_result = self._call_portal_isolated(
+                    run_portal_automation,
                     csv_path=adobe_csvs[0],
                     progress_callback=log,
                     headless=False,
@@ -1036,7 +1064,8 @@ class StockTaggerApp:
                     details.append(f"写真{len(photo_ss_files)}")
                 log(f"  内訳: {' / '.join(details)}")
 
-                ss_portal_result = ss_portal(
+                ss_portal_result = self._call_portal_isolated(
+                    ss_portal,
                     csv_path=ss_csvs[0],
                     files=all_ss_files,
                     progress_callback=log,
@@ -1090,7 +1119,8 @@ class StockTaggerApp:
                     if vector_zips:
                         details.append(f"ベクター{len(vector_zips)}")
                     log(f"  内訳: {' / '.join(details)}")
-                    pixta_result = pixta_upload(
+                    pixta_result = self._call_portal_isolated(
+                        pixta_upload,
                         files=illust_files,
                         progress_callback=log,
                         skip_submit=self.test_mode,
@@ -1131,7 +1161,8 @@ class StockTaggerApp:
                             log(f"  解析完了: タイトル={title[:40]} / タグ{len(tags)}件")
                         video_metadata.append({"title": title, "tags": tags})
 
-                    footage_result = run_footage_upload(
+                    footage_result = self._call_portal_isolated(
+                        run_footage_upload,
                         files=all_videos,
                         metadata=video_metadata,
                         progress_callback=log,
@@ -1149,7 +1180,8 @@ class StockTaggerApp:
                 try:
                     log("\n" + "─" * 40)
                     log(f"📷 Pixta 写真アップロード開始... ({len(photo_images)}件)")
-                    photo_pixta_result = pixta_upload(
+                    photo_pixta_result = self._call_portal_isolated(
+                        pixta_upload,
                         files=photo_images,
                         progress_callback=log,
                         skip_submit=self.test_mode,
