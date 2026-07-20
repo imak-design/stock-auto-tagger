@@ -928,6 +928,7 @@ class StockTaggerApp:
         folder_path = _Path(folder)
         csv_folder = folder_path / "csv_output"
         failed_services = []  # エラーが発生したサービス名を記録
+        manual_services = []  # 手動対応待ちのサービス [(名前, 理由)]（エラーではない）
         enabled_sites = self._get_enabled_sites()
 
         # ---- Adobe Stock（全素材を1回でアップロード）----
@@ -985,7 +986,14 @@ class StockTaggerApp:
                     no_wait=self.test_mode,
                     playwright_instance=_pw,
                 )
-                log(f"[OK] Adobe ポータル提出完了: {portal_result['submitted']}件")
+                if portal_result.get("manual_required"):
+                    reason = portal_result.get("manual_reason", "理由不明")
+                    log(f"[!] Adobe 審査提出が完了していません: {reason}")
+                    log("    ファイルはアップロード済みです。開いているブラウザで手動提出してください。")
+                    log("    このまま次のサイトの処理に進みます。")
+                    manual_services.append(("Adobe Stock", reason))
+                else:
+                    log(f"[OK] Adobe ポータル提出完了: {portal_result['submitted']}件")
                 self._uploaded_sites.add("adobe")
             except Exception as e:
                 log(f"[NG] Adobe エラー: {e}")
@@ -1163,9 +1171,15 @@ class StockTaggerApp:
                 self._enable_all_btns()
                 self._enable_btn(self.move_btn, bg="#e94560")
                 svc_list = "\n".join(f"• {s}" for s in failed_services)
+                manual_note = ""
+                if manual_services:
+                    manual_note = "\n\n［要手動対応］以下は審査提出が完了していません:\n" + "\n".join(
+                        f"• {n}: {r}" for n, r in manual_services
+                    ) + "\n開いているブラウザで手動提出してください。"
                 self._show_topmost_popup(
                     "一部エラーあり",
-                    f"以下のサービスでエラーが発生しました:\n{svc_list}\n\nファイル移動をスキップしました。",
+                    f"以下のサービスでエラーが発生しました:\n{svc_list}\n\n"
+                    f"ファイル移動をスキップしました。{manual_note}",
                     error=True
                 )
             self.root.after(0, on_pipeline_error)
@@ -1201,8 +1215,14 @@ class StockTaggerApp:
         def on_pipeline_done():
             self._stop_timer()
             self._log("\n" + "─" * 50, "dim")
-            self._log(f"✓ 全工程完了！（処理時間: {_minutes}分{_seconds}秒）", "success")
-            self.status_label.config(text="完了")
+            if manual_services:
+                self._log(f"⚠ 全工程終了（処理時間: {_minutes}分{_seconds}秒）— 要手動対応あり", "error")
+                for _n, _r in manual_services:
+                    self._log(f"    • {_n}: {_r}", "error")
+                self.status_label.config(text="要手動対応")
+            else:
+                self._log(f"✓ 全工程完了！（処理時間: {_minutes}分{_seconds}秒）", "success")
+                self.status_label.config(text="完了")
             self.is_running = False
             self._enable_all_btns()
             _time_str = f"{_minutes}分{_seconds}秒" if _minutes > 0 else f"{_seconds}秒"
@@ -1212,6 +1232,17 @@ class StockTaggerApp:
                     f"全サイトへのアップロードが完了しました。\n処理時間: {_time_str}\n\n"
                     "各サイトのブラウザが開いています。\n"
                     "タイトル・タグを確認・編集して、手動で審査申請してください。"
+                )
+            elif manual_services:
+                manual_list = "\n".join(f"• {n}: {r}" for n, r in manual_services)
+                self._show_topmost_popup(
+                    "要手動対応（審査提出が未完了）",
+                    f"アップロードとファイル移動は完了しました。\n処理時間: {_time_str}\n\n"
+                    f"ただし以下は審査提出が完了していません:\n{manual_list}\n\n"
+                    "ファイル自体はアップロード済みです。\n"
+                    "開いているブラウザで画像選択などの確認に対応し、\n"
+                    "手動で審査提出を完了してください。",
+                    error=True
                 )
             else:
                 self._show_topmost_popup("全工程完了", f"アップロード＆ファイル移動まで全て完了しました。\n処理時間: {_time_str}")
@@ -1287,6 +1318,8 @@ class StockTaggerApp:
             _step_start = _time.time()
             log = lambda m: self.root.after(0, lambda msg=m: self._log(msg))
 
+            manual_reason = ""
+
             try:
                 # 全ファイルを統合（動画含む）
                 all_files = list(targets) + list(vector_eps) + list(ai_files) + list(photo_files)
@@ -1325,15 +1358,32 @@ class StockTaggerApp:
                         confirm_submit_callback=lambda: not self.test_mode,
                         file_settings=file_settings,
                     )
-                    log(f"[OK] ポータル提出完了: {portal_result['submitted']}件")
+                    if portal_result.get("manual_required"):
+                        manual_reason = portal_result.get("manual_reason", "理由不明")
+                        log(f"[!] 審査提出が完了していません: {manual_reason}")
+                        log("    ファイルはアップロード済みです。ブラウザは開いたままにします。")
+                    else:
+                        log(f"[OK] ポータル提出完了: {portal_result['submitted']}件")
 
                 _el = int(_time.time() - _step_start)
                 _m, _s = divmod(_el, 60)
                 _t = f"{_m}分{_s}秒" if _m > 0 else f"{_s}秒"
-                def on_adobe_done(_t=_t):
-                    self._log("\n✓ 工程2 Adobe 完了！", "success")
+                def on_adobe_done(_t=_t, _reason=manual_reason):
                     self._enable_btn(self.adobe_btn, bg="#1a6fa8")
-                    self._show_topmost_popup("工程2 完了", f"Adobe Stock アップロード完了！\n処理時間: {_t}")
+                    if _reason:
+                        self._log("\n⚠ 工程2 Adobe — 要手動対応（審査提出が未完了）", "error")
+                        self._show_topmost_popup(
+                            "要手動対応（審査提出が未完了）",
+                            f"Adobe Stock へのアップロードは完了しましたが、\n"
+                            f"審査提出が完了していません。\n\n理由: {_reason}\n\n"
+                            "ブラウザを開いたままにしています。\n"
+                            "画像選択などの確認に対応し、手動で審査提出を\n"
+                            "完了してください。",
+                            error=True
+                        )
+                    else:
+                        self._log("\n✓ 工程2 Adobe 完了！", "success")
+                        self._show_topmost_popup("工程2 完了", f"Adobe Stock アップロード完了！\n処理時間: {_t}")
                 self.root.after(0, on_adobe_done)
             except Exception as e:
                 def on_adobe_err(err=str(e)):

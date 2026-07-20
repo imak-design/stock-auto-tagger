@@ -84,6 +84,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
         )
         page = context.new_page()
         _keep_open = False
+        _manual_required = False
+        manual_reason = ""
+        metadata_applied = 0
 
         try:
             # --- ポータルを開く ------------------------------------
@@ -209,6 +212,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # --- Step1: CSV アップロードでメタデータを一括適用 --------
             log("\n>> CSV アップロード開始...")
             submitted = _upload_metadata_csv(page, upload_csv, log)
+            metadata_applied = max(submitted, 0)
 
             # --- Step2: コンテンツタイプ + AI設定 ------
             if file_settings:
@@ -231,7 +235,23 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 if confirm_submit_callback:
                     should_submit = confirm_submit_callback()
                 if should_submit:
-                    _submit_for_review(page, log)
+                    result = _submit_for_review(page, log)
+                    submitted = result["submitted"]
+                    if not result["ok"]:
+                        manual_reason = result["reason"]
+                        if result["manual_required"]:
+                            # CAPTCHA 等: ブラウザを閉じずに人間へ引き渡す
+                            _keep_open = True
+                            _manual_required = True
+                            log("\n" + "=" * 50)
+                            log("[要手動対応] 審査提出が完了していません。")
+                            log(f"  理由: {manual_reason}")
+                            log("  ファイル自体は Adobe にアップロード済みです。")
+                            log("  開いているブラウザで表示中の確認に対応し、")
+                            log("  手動で審査提出を完了してください。")
+                            log("=" * 50)
+                        else:
+                            errors.append(f"Adobe 審査提出: {manual_reason}")
                 else:
                     # テストモード: 全選択だけして審査登録ボタン手前で停止
                     _keep_open = True
@@ -258,7 +278,10 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 browser.close()
                 if _own_playwright:
                     p.stop()
-            elif no_wait:
+            elif no_wait or _manual_required:
+                # 手動対応待ちでもここでブロックしない。
+                # ブロックすると全工程モードで後続サイトに進めず、
+                # 単体モードでは通知ポップアップが出せなくなる。
                 log("ブラウザを開いたままにします。（次の工程に進みます）")
             else:
                 log("ブラウザを開いたままにします。ブラウザを閉じると次の処理に進みます。")
@@ -282,7 +305,13 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             p.stop()
         raise
 
-    return {"submitted": submitted, "errors": errors}
+    return {
+        "submitted": submitted,              # 実際に審査提出できた件数
+        "metadata_applied": metadata_applied,  # CSV メタデータを適用できた件数
+        "errors": errors,
+        "manual_required": _manual_required,
+        "manual_reason": manual_reason,
+    }
 
 
 def _upload_files(page, files: list, log) -> int:
@@ -894,6 +923,81 @@ def _upload_metadata_csv(page, csv_path: Path, log) -> int:
     return len(content)
 
 
+# 人間性チェック（画像選択CAPTCHA / 5ワード入力）の検出用ヒント
+_CHALLENGE_FRAME_HINTS = (
+    "hcaptcha", "recaptcha", "arkoselabs", "funcaptcha",
+    "captcha", "geetest", "perimeterx", "imperva",
+)
+_CHALLENGE_DOM_SELECTORS = (
+    '[data-t="image-challenge-input"]',
+    '[class*="challenge"] input',
+    '[class*="captcha"]',
+    '[class*="microtask"]',
+    'input[placeholder*="単語"]',
+    'input[placeholder*="word" i]',
+)
+
+
+def _detect_human_challenge(page):
+    """
+    「猫の画像を選べ」系の画像選択CAPTCHA や 5ワード入力チャレンジを検出する。
+    CAPTCHA はプログラムで突破しない（突破を試みると誤答でアカウント評価を下げる）。
+    検出したら人間に引き渡すための説明文を返す。未検出なら None。
+    """
+    # iframe（hCaptcha/reCAPTCHA 等は iframe 内に出るため page.locator では届かない）
+    try:
+        for fr in page.frames:
+            url = (fr.url or "").lower()
+            if any(h in url for h in _CHALLENGE_FRAME_HINTS):
+                return f"画像選択CAPTCHA（iframe: {fr.url[:100]}）"
+    except Exception:
+        pass
+
+    # ページ内に直接描画されるタイプ
+    for sel in _CHALLENGE_DOM_SELECTORS:
+        try:
+            loc = page.locator(sel)
+            if loc.count() and loc.first.is_visible():
+                return f"人間性チェック（{sel}）"
+        except Exception:
+            continue
+    return None
+
+
+def _verify_submission(page, before_names: set, log, rounds: int = 24):
+    """
+    審査提出が実際に完了したかを検証する。
+    提出済みファイルは uploads 一覧から消えるため、対象が消えたことを成功条件とする。
+    戻り値: (ok: bool, remaining: set, challenge: str|None)
+    """
+    remaining = set(before_names)
+    for i in range(rounds):
+        challenge = _detect_human_challenge(page)
+        if challenge:
+            return False, remaining, challenge
+
+        try:
+            data = page.evaluate("() => window.__react_context__")
+            content = data.get("reduxState", {}).get("content", []) or []
+            now_names = {item.get("originalName", "") for item in content}
+            remaining = before_names & now_names
+            if not remaining:
+                return True, set(), None
+        except Exception:
+            pass
+
+        time.sleep(5)
+        # 定期的にリロードして反映を促す
+        if i % 4 == 3:
+            try:
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                time.sleep(3)
+            except Exception:
+                pass
+
+    return False, remaining, None
+
+
 def _submit_for_review(page, log):
     """
     全ファイルを選択して審査に登録する。
@@ -901,25 +1005,47 @@ def _submit_for_review(page, log):
       1. 全選択 -> submit-moderation-button クリック
       2. ガイドライン同意チェックボックス x2 -> continue-moderation-button
       3. サムネイル確認ダイアログ -> send-moderation-button
-      4. (任意) 5ワード入力チャレンジ -> 入力 -> 送信
+      4. 提出完了を検証（uploads 一覧から消えたか）
+
+    人間性チェック（画像選択CAPTCHA / 5ワード入力）が出た場合は自動突破せず、
+    manual_required=True で呼び出し元に返して人間に対応してもらう。
+
+    戻り値: {"ok": bool, "submitted": int, "manual_required": bool, "reason": str}
     """
     log("\n>> 審査に登録...")
+
+    # 提出対象のファイル名を控える（提出後の検証に使用）
+    try:
+        data = page.evaluate("() => window.__react_context__")
+        before_content = data.get("reduxState", {}).get("content", []) or []
+        before_names = {item.get("originalName", "") for item in before_content}
+    except Exception:
+        before_names = set()
+    target_count = len(before_names)
+
+    def _fail(reason, manual=False):
+        log(f"[!] 審査提出未完了: {reason}")
+        return {"ok": False, "submitted": 0, "manual_required": manual, "reason": reason}
+
+    # 提出前に既にチャレンジが出ていないか確認
+    pre_challenge = _detect_human_challenge(page)
+    if pre_challenge:
+        return _fail(f"提出前に{pre_challenge}が表示されました", manual=True)
 
     # --- Step A: 全選択 ---
     select_all = page.locator('input[type=checkbox]').first
     try:
-        if select_all.is_visible(timeout=3000) and not select_all.is_checked():
+        if select_all.count() and select_all.is_visible() and not select_all.is_checked():
             select_all.click()
             time.sleep(1)
             log("全ファイルを選択")
-    except PWTimeout:
+    except Exception:
         log("[!] 全選択チェックボックスが見つかりません")
 
     # --- Step B: 審査登録ボタン ---
     submit_btn = page.locator('[data-t="submit-moderation-button"]').first
-    if not submit_btn.is_visible(timeout=5000):
-        log("[!] 審査登録ボタンが見つかりません")
-        return
+    if not submit_btn.count() or not submit_btn.is_visible():
+        return _fail("審査登録ボタンが見つかりません")
     log(f"審査登録ボタン: {submit_btn.inner_text().strip()}")
     submit_btn.click()
     time.sleep(2)
@@ -950,94 +1076,55 @@ def _submit_for_review(page, log):
         time.sleep(2.5)
         log("続行ボタンクリック")
     except PWTimeout:
-        log("[!] 続行ボタンが有効になりませんでした")
-        return
+        challenge = _detect_human_challenge(page)
+        if challenge:
+            return _fail(f"{challenge}が表示されたため続行できません", manual=True)
+        return _fail("続行ボタンが有効になりませんでした")
 
     # --- Step E: サムネイル確認ダイアログ -> 全選択確認 -> 審査へ ---
+    send_btn = page.locator('[data-t="send-moderation-button"]').first
+    if not send_btn.count() or not send_btn.is_visible():
+        challenge = _detect_human_challenge(page)
+        if challenge:
+            return _fail(f"{challenge}が表示されたため続行できません", manual=True)
+        return _fail("サムネイル確認ダイアログが見つかりません")
+
+    # ダイアログ内の全選択チェックボックス（最初のものが「全て選択」）
     try:
-        send_btn = page.locator('[data-t="send-moderation-button"]').first
-        if send_btn.is_visible(timeout=5000):
-            # ダイアログ内の全選択チェックボックス（最初のものが「全て選択」）
-            dlg_select_all = page.locator('.modal__body input[type=checkbox]').first
-            if dlg_select_all.count() and not dlg_select_all.is_checked():
-                dlg_select_all.click()
-                time.sleep(0.8)
-                log("サムネイルダイアログ: 全て選択")
+        dlg_select_all = page.locator('.modal__body input[type=checkbox]').first
+        if dlg_select_all.count() and not dlg_select_all.is_checked():
+            dlg_select_all.click()
+            time.sleep(0.8)
+            log("サムネイルダイアログ: 全て選択")
+    except Exception:
+        pass
 
-            # send-moderation-button をクリック（force=True で inactive クラスを無視）
-            send_btn.click(force=True)
-            time.sleep(3)
-            log("審査へボタンクリック")
-    except PWTimeout:
-        log("[!] サムネイル確認ダイアログが見つかりません")
-        return
+    # send-moderation-button をクリック（force=True で inactive クラスを無視）
+    send_btn.click(force=True)
+    time.sleep(3)
+    log("審査へボタンクリック")
 
-    # --- Step F: 5ワード入力チャレンジ（たまに出現）---
-    _handle_five_word_challenge(page, log)
+    # --- Step F: 提出完了の検証 ---
+    # ここまでのクリックが通っても、人間性チェック（猫画像の選択 / 5ワード入力）が
+    # 割り込むと実際には提出されない。クリックできた＝提出できた、とは扱わない。
+    log("提出結果を確認しています...")
+    ok, remaining, challenge = _verify_submission(page, before_names, log)
 
-    log("[OK] 審査提出完了")
+    if challenge:
+        return _fail(
+            f"{challenge}が表示されました。プログラムでは突破できません", manual=True
+        )
 
+    if not ok:
+        for name in sorted(remaining):
+            log(f"  [!] 未提出のまま残っています: {name}")
+        return _fail(
+            f"提出を確認できませんでした（{len(remaining)}/{target_count}件が一覧に残存）",
+            manual=True,
+        )
 
-def _handle_five_word_challenge(page, log):
-    """
-    Adobe Stock のキャプチャ的な「画像を表す単語を5つ入力」チャレンジを処理する。
-    出現しない場合は何もしない。
-    """
-    # チャレンジ画面の検出: テキスト入力欄が5つ並ぶ or 特定 data-t
-    challenge_selectors = [
-        '[data-t="image-challenge-input"]',
-        'input[placeholder*="word" i]',
-        'input[placeholder*="単語"]',
-        '[class*="challenge"] input',
-        '[class*="microtask"] input',
-    ]
-    challenge_input = None
-    for sel in challenge_selectors:
-        el = page.locator(sel).first
-        try:
-            if el.is_visible(timeout=2000):
-                challenge_input = el
-                log("5ワードチャレンジ検出")
-                break
-        except PWTimeout:
-            continue
-
-    if challenge_input is None:
-        return  # チャレンジなし
-
-    # 入力欄を全て取得して汎用的な単語を入力
-    generic_words = ["light", "glow", "abstract", "neon", "color",
-                     "bright", "wave", "energy", "motion", "digital"]
-    inputs = page.locator(
-        '[data-t="image-challenge-input"], '
-        'input[placeholder*="word" i], '
-        '[class*="challenge"] input'
-    ).all()
-
-    for i, inp in enumerate(inputs[:5]):
-        try:
-            inp.fill(generic_words[i])
-            time.sleep(0.3)
-        except Exception:
-            pass
-
-    # 送信ボタンを探してクリック
-    submit_selectors = [
-        '[data-t="challenge-submit"]',
-        'button:has-text("送信")',
-        'button:has-text("Submit")',
-        'button[type="submit"]',
-    ]
-    for sel in submit_selectors:
-        try:
-            btn = page.locator(sel).first
-            if btn.is_visible(timeout=2000):
-                btn.click()
-                time.sleep(2)
-                log("5ワードチャレンジ送信")
-                break
-        except PWTimeout:
-            continue
+    log(f"[OK] 審査提出完了: {target_count}件")
+    return {"ok": True, "submitted": target_count, "manual_required": False, "reason": ""}
 
 
 # --------------------------------------------------------------
