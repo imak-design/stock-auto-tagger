@@ -23,6 +23,17 @@ def _convert_csv_categories(src_path: Path) -> Path:
     return src_path
 
 
+def _error_status_names(content_items):
+    """反映済み一覧のうち status がエラーを示唆するファイルを返す（ログ用）。
+    status の実値は未確定のため判定条件には使わず、打ち切り時の参考情報に留める。"""
+    names = []
+    for item in content_items:
+        status = str(item.get("status", "")).lower()
+        if any(k in status for k in ("error", "fail", "reject", "invalid", "denied")):
+            names.append(f"{item.get('originalName', '?')} (status={item.get('status')})")
+    return names
+
+
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
                           expected_count: int = 0, files: list = None,
                           confirm_submit_callback=None, is_ai: bool = False,
@@ -162,21 +173,39 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
 
             # ポータルへのファイル反映を待機（新規分が増えるまで最大30分）
             # ★リロード禁止: アップロード中のXHRが切断されるため
+            # Adobe側で弾かれたファイルは永遠に反映されないため、リロードを重ねても
+            # 反映数が増えない場合は残りを失敗とみなして早期に打ち切る（stall検知）
             if expected_count > 0:
                 target_count = initial_count + expected_count
                 log(f"ポータルへのファイル反映を待っています（目標: {target_count}件、最大30分）...")
+                best_count = initial_count
+                polls_since_progress = 0
+                reloads_since_progress = 0
                 for i in range(180):
                     time.sleep(10)
                     try:
                         data = page.evaluate("() => window.__react_context__")
-                        current = len(data.get("reduxState", {}).get("content", []))
+                        content_now = data.get("reduxState", {}).get("content", [])
+                        current = len(content_now)
+                        polls_since_progress += 1
+                        if current > best_count:
+                            best_count = current
+                            polls_since_progress = 0
+                            reloads_since_progress = 0
                         if current >= target_count:
                             log(f"ファイル反映確認: {current}件（新規 {current - initial_count}件）")
+                            break
+                        if reloads_since_progress >= 3 and polls_since_progress >= 12:
+                            log(f"[!] リロード{reloads_since_progress}回・約{polls_since_progress * 10}秒の間、反映数が{current}件から増えません。")
+                            log(f"    未反映の{target_count - current}件はアップロード失敗とみなして続行します。")
+                            for line in _error_status_names(content_now):
+                                log(f"    エラー状態: {line}")
                             break
                         if i % 6 == 0:
                             log(f"  ...{(i+1)*10}秒経過, 現在{current}件/{target_count}件目標。ページ更新中...")
                             page.reload(wait_until="domcontentloaded", timeout=30000)
                             time.sleep(4)
+                            reloads_since_progress += 1
                     except Exception:
                         pass
                 else:
@@ -193,6 +222,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             if files and actual_new < len(files):
                 missing = len(files) - actual_new
                 log(f"[!] 警告: {missing}件が未反映。再待機します...")
+                stall_iters = 0
                 for i in range(30):
                     time.sleep(10)
                     try:
@@ -200,9 +230,17 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         time.sleep(4)
                         data = page.evaluate("() => window.__react_context__")
                         content = data.get("reduxState", {}).get("content", [])
-                        actual_new = len(content) - initial_count
+                        new_actual = len(content) - initial_count
+                        if new_actual > actual_new:
+                            stall_iters = 0
+                        else:
+                            stall_iters += 1
+                        actual_new = new_actual
                         if actual_new >= len(files):
                             log(f"反映確認: {actual_new}件（全件反映）")
+                            break
+                        if stall_iters >= 3:
+                            log(f"[!] リロードしても反映数が増えないため再待機を打ち切ります: {actual_new}/{len(files)}件で続行します")
                             break
                         log(f"  ...再待機 {(i+1)*10}秒, 現在{actual_new}/{len(files)}件")
                     except Exception:
