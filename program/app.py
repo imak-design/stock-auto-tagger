@@ -130,6 +130,64 @@ def save_config(config: dict):
         json.dump(save_data, f, ensure_ascii=False, indent=2)
 
 # ============================================================
+# csv_output の同サイト CSV マージ
+# ============================================================
+
+def merge_site_csvs(csv_list, progress_cb=None):
+    """同一サイトの CSV が複数枚あれば最新 1 枚に全行をマージして返す。
+
+    ポータル自動化は csv_path を 1 枚しか受け取らないため、csv_output に
+    CSV が複数枚並存すると古い方のメタデータが未適用のままアップロードされる
+    （2026-07-24: AI 2本がタイトル・タグ空で提出された事故）。
+    csv_list は mtime 降順ソート済み（[0] が最新）を前提。
+    同一 Filename の行は新しい CSV の行を優先。マージ後、古い CSV はゴミ箱へ送る。
+    失敗時は従来挙動（最新 1 枚）にフォールバックする。
+    """
+    if not csv_list:
+        return None
+    if len(csv_list) == 1:
+        return csv_list[0]
+
+    import csv as _csv
+    newest = csv_list[0]
+    try:
+        header = None
+        merged = {}  # Filename -> row（古い順に読み、新しい行で上書き）
+        for path in reversed(csv_list):
+            with open(path, "r", encoding="utf-8-sig", newline="") as f:
+                reader = _csv.reader(f)
+                rows = [r for r in reader if any(cell.strip() for cell in r)]
+            if not rows:
+                continue
+            if header is None or path == newest:
+                header = rows[0]
+            for row in rows[1:]:
+                merged[row[0]] = row
+
+        if header is None or not merged:
+            return newest
+
+        with open(newest, "w", encoding="utf-8-sig", newline="") as f:
+            writer = _csv.writer(f)
+            writer.writerow(header)
+            writer.writerows(merged.values())
+
+        for old in csv_list[1:]:
+            try:
+                from send2trash import send2trash as _send2trash
+                _send2trash(str(old))
+            except Exception:
+                pass  # 掃除失敗は無害（次回マージで再度吸収される）
+
+        if progress_cb:
+            progress_cb(f"  [CSV] {len(csv_list)}枚を統合: {len(merged)}行 → {newest.name}")
+        return newest
+    except Exception as e:
+        if progress_cb:
+            progress_cb(f"  [!] CSV統合に失敗（最新1枚のみ使用します）: {e}")
+        return newest
+
+# ============================================================
 # GUIアプリ
 # ============================================================
 
@@ -1005,7 +1063,7 @@ class StockTaggerApp:
 
                 portal_result = self._call_portal_isolated(
                     run_portal_automation,
-                    csv_path=adobe_csvs[0],
+                    csv_path=merge_site_csvs(adobe_csvs, log),
                     progress_callback=log,
                     headless=False,
                     files=all_adobe_files,
@@ -1066,7 +1124,7 @@ class StockTaggerApp:
 
                 ss_portal_result = self._call_portal_isolated(
                     ss_portal,
-                    csv_path=ss_csvs[0],
+                    csv_path=merge_site_csvs(ss_csvs, log),
                     files=all_ss_files,
                     progress_callback=log,
                     headless=False,
@@ -1324,7 +1382,7 @@ class StockTaggerApp:
             messagebox.showerror("エラー", "Adobe用CSVが見つかりません。先に工程1を実行してください。")
             return
 
-        csv_path = csvs[0]
+        csv_path = merge_site_csvs(csvs, self._log)
 
         # --- 開始前確認ダイアログ ---
         all_targets = targets + vector_eps + photo_files + ai_files
@@ -1482,7 +1540,7 @@ class StockTaggerApp:
             messagebox.showerror("エラー", "Shutterstockにアップロード対象のファイルがありません。")
             return
 
-        csv_path = csvs[0]
+        csv_path = merge_site_csvs(csvs, self._log)
 
         all_targets = all_ss_files
         # --- 開始前確認ダイアログ ---
