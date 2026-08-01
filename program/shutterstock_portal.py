@@ -59,6 +59,59 @@ def _ensure_all_selected(page, log):
     return len(cbs)
 
 
+def _apply_csv_on_tab(page, csv_path: Path, log, label: str) -> bool:
+    """今開いているタブで CSV メタデータを適用する。成功したら全選択まで済ませて True を返す。
+
+    CSV 適用は元々 写真タブでしか行っていなかったが、「CSVをアップロード」ボタンは
+    そのタブに素材が 1 つも無いと画面に存在しない。静止画が無い日は CSV が一度も当たらず、
+    動画が説明もキーワードも空のまま「未送信」に滞留する（2026-08-01 判明）。
+
+    失敗しても例外にしない。ここで落とすと後続の処理まで巻き添えになるため。
+    """
+    try:
+        csv_btn = page.locator('button[data-testid="csv-upload"]')
+        csv_btn.wait_for(state="visible", timeout=8000)
+    except PWTimeout:
+        log(f"[!] {label}: CSVアップロードボタンが見つかりません。CSV適用をスキップします")
+        return False
+
+    try:
+        log(f"{label}: CSV適用中: {csv_path.name}")
+        csv_btn.click()
+        time.sleep(1)
+
+        dialog = page.locator('[role="dialog"]')
+        dialog.wait_for(state="visible", timeout=8000)
+
+        with page.expect_file_chooser(timeout=10000) as fc_info:
+            dialog.get_by_role("button", name=re.compile("アップロード", re.I)).click()
+        fc_info.value.set_files(str(csv_path))
+        log(f"{label}: CSV セット完了: {csv_path.name}")
+        time.sleep(4)
+
+        for _ in range(10):
+            if not dialog.is_visible():
+                break
+            time.sleep(1)
+
+        page.reload(wait_until="domcontentloaded", timeout=30000)
+        time.sleep(5)
+        _close_popups(page)
+
+        # 全選択してから反映を確認する（reload は選択を解除し、送信ボタンを消すのでここで行う）
+        _select_all(page, log)
+        time.sleep(2)
+        chips = page.locator('[data-testid^="selected-keyword-"]').count()
+        if chips > 0:
+            log(f"[OK] {label}: CSVメタデータ反映確認（keyword {chips}件）")
+        else:
+            log(f"[!] {label}: keyword未検出のまま続行します")
+        return True
+    except Exception as e:
+        log(f"[!] {label}: CSV適用に失敗しました（続行します）: {e}")
+        return False
+
+
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
                           files: list = None, expected_count: int = 0, skip_submit: bool = False,
                           no_wait: bool = False, playwright_instance=None):
@@ -276,7 +329,13 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                             page.locator('input[type="checkbox"]').first.wait_for(state="visible", timeout=15000)
                         except PWTimeout:
                             log("[!] 動画チェックボックスが見つかりません")
-                        _select_all(page, log)
+
+                        # 動画タブでも CSV を当てる（2026-08-01 追加）。
+                        # 写真タブでの適用は、その日に静止画が無いと「CSVをアップロード」ボタン自体が
+                        # 存在せず実行できない。動画だけの日に動画のメタデータが空のまま残るのを防ぐ。
+                        # 成功時は全選択まで済むので、失敗したときだけ従来どおり全選択する。
+                        if not _apply_csv_on_tab(page, csv_path, log, "動画"):
+                            _select_all(page, log)
 
                         submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
                         try:
