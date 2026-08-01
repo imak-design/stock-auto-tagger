@@ -85,6 +85,51 @@ def _launch(p):
     return browser, context
 
 
+# PIXTA はアクセス集中時、通常ページの代わりに静的な混雑ページを返す（2026-08-01 実事故）。
+# HTTP 200 で返るためエラーにならず、「a.upload-button が出ない」というセレクタ待ちの
+# タイムアウトとしてしか現れないので、DOM変更と見分けがつかない。ここで明示的に検出する。
+CONGESTION_TITLE = "Too many users are trying to access"
+CONGESTION_TEXT = "アクセスが集中しております"
+
+
+def _is_congestion_page(page) -> bool:
+    try:
+        if CONGESTION_TITLE in (page.title() or ""):
+            return True
+    except Exception:
+        pass
+    try:
+        return page.locator(f"text={CONGESTION_TEXT}").count() > 0
+    except Exception:
+        return False
+
+
+def _goto_upload_page(page, url: str, log, attempts: int = 4, wait_sec: int = 45):
+    """アップロードページを開く。混雑ページを掴んだら間を置いて開き直す。
+
+    同一実行内でも片方のページだけが混雑に当たることがある（2026-08-01: イラスト側が被弾）。
+    リトライしきれなかった場合だけ例外にする。
+    """
+    for attempt in range(1, attempts + 1):
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(3)
+
+        if "sign_in" in page.url or "login" in page.url:
+            raise PermissionError("Session expired. Run pixta_login.py again.")
+
+        if not _is_congestion_page(page):
+            return
+
+        if attempt < attempts:
+            log(f"[!] PIXTA が混雑ページを返しました（{attempt}/{attempts}）。{wait_sec}秒待って開き直します...")
+            time.sleep(wait_sec)
+
+    raise RuntimeError(
+        f"PIXTA が混雑ページ（アクセス集中）を返し続けています。{attempts}回試行しました。"
+        "時間をおいて再実行してください。"
+    )
+
+
 def run_footage_upload(
     files: list,
     metadata: list,
@@ -166,11 +211,7 @@ def run_footage_upload(
             # Phase 1: ファイルアップロード
             # -------------------------------------------------------
             log("Opening Pixta footage upload page...")
-            page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(3)
-
-            if "sign_in" in page.url or "login" in page.url:
-                raise PermissionError("Session expired. Run pixta_login.py again.")
+            _goto_upload_page(page, UPLOAD_URL, log)
             log(f"Page loaded: {page.url}")
 
             # 「作品を選択」ボタン → file chooser で全ファイルをセット

@@ -90,6 +90,51 @@ def _launch(p):
     return browser, context
 
 
+# PIXTA はアクセス集中時、通常ページの代わりに静的な混雑ページを返す（2026-08-01 実事故）。
+# HTTP 200 で返るためエラーにならず、「a.upload-button が出ない」というセレクタ待ちの
+# タイムアウトとしてしか現れないので、DOM変更と見分けがつかない。ここで明示的に検出する。
+CONGESTION_TITLE = "Too many users are trying to access"
+CONGESTION_TEXT = "アクセスが集中しております"
+
+
+def _is_congestion_page(page) -> bool:
+    try:
+        if CONGESTION_TITLE in (page.title() or ""):
+            return True
+    except Exception:
+        pass
+    try:
+        return page.locator(f"text={CONGESTION_TEXT}").count() > 0
+    except Exception:
+        return False
+
+
+def _goto_upload_page(page, url: str, log, attempts: int = 4, wait_sec: int = 45):
+    """アップロードページを開く。混雑ページを掴んだら間を置いて開き直す。
+
+    同一実行内でもイラスト側だけが混雑に当たることがある（2026-08-01: 動画側は素通り）。
+    リトライしきれなかった場合だけ例外にする。
+    """
+    for attempt in range(1, attempts + 1):
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(3)
+
+        if "sign_in" in page.url or "login" in page.url:
+            raise PermissionError("Session expired. Run pixta_login.py again.")
+
+        if not _is_congestion_page(page):
+            return
+
+        if attempt < attempts:
+            log(f"[!] PIXTA が混雑ページを返しました（{attempt}/{attempts}）。{wait_sec}秒待って開き直します...")
+            time.sleep(wait_sec)
+
+    raise RuntimeError(
+        f"PIXTA が混雑ページ（アクセス集中）を返し続けています。{attempts}回試行しました。"
+        "時間をおいて再実行してください。"
+    )
+
+
 def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool = False, is_ai: bool = False, is_photo: bool = False, ai_filenames: set = None, no_wait: bool = False, playwright_instance=None) -> dict:
     """
     Pixta イラストアップロード → 審査申請 を全自動で実行する。
@@ -155,11 +200,7 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
             # Phase 1: ファイルアップロード
             # -------------------------------------------------------
             log(f"Opening Pixta upload page ({'写真' if is_photo else 'イラスト'})...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(3)
-
-            if "sign_in" in page.url or "login" in page.url:
-                raise PermissionError("Session expired. Run pixta_login.py again.")
+            _goto_upload_page(page, url, log)
             log(f"Page loaded: {page.url}")
 
             # アップロード前のペンディング件数を記録
@@ -470,11 +511,7 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
 
         try:
             log(f"Opening Pixta upload page ({'写真' if is_photo else 'イラスト'})...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(3)
-
-            if "sign_in" in page.url or "login" in page.url:
-                raise PermissionError("Session expired. Run pixta_login.py again.")
+            _goto_upload_page(page, url, log)
             log(f"Page loaded: {page.url}")
 
             # ページネーション対応: 全ページの作品を選択→登録を繰り返す
