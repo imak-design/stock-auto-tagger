@@ -59,6 +59,125 @@ def _ensure_all_selected(page, log):
     return len(cbs)
 
 
+def _wait_not_submitted_cleared(page, log, label, timeout=90, reload_every=15):
+    """「未送信」タブのカウンタが (0) になるまで reload しながら待つ。
+
+    提出直後のカウンタは、ポータル側が数字を取り直して描き直すまで**提出前の値**を
+    表示したままになる。提出ボタンを押して 4 秒待って 1 回読むだけだと、実際は全件提出
+    できているのに「未提出が残っています」と誤って警告していた。
+    アップロード確認と同じ reload ポーリング方式に揃える。
+
+    カウンタが数字として一度も読めなかった場合（描画前でラベルしか無い等）は
+    "unknown" を返し、「本当に残っている（remains）」と区別する。
+
+    戻り値: ("cleared" | "remains" | "unknown", 最後に読めたタブ文字列)
+    """
+    deadline = time.time() + timeout
+    next_reload = time.time() + reload_every
+    last_text = ""
+    last_count = None
+
+    while True:
+        try:
+            text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
+            last_text = text
+            m = re.search(r'\((\d+)\)', text)
+            if m:
+                last_count = int(m.group(1))
+                if last_count == 0:
+                    log(f"[OK] {label}: 全件提出完了")
+                    return "cleared", text
+        except Exception:
+            pass
+
+        if time.time() >= deadline:
+            break
+        time.sleep(2)
+
+        if time.time() >= next_reload:
+            # 提出後なので reload してよい（送信ボタンはもう使わないため選択解除は無害）
+            try:
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                time.sleep(3)
+                _close_popups(page)
+            except Exception:
+                pass
+            next_reload = time.time() + reload_every
+
+    if last_count is not None:
+        log(f"[!] {label}: {timeout}秒待っても未提出が残っています: {last_text}")
+        return "remains", last_text
+
+    log(f"[!] {label}: 未送信タブのカウンタを読めませんでした（提出の成否は未確認）")
+    return "unknown", last_text
+
+
+def _csv_english_keywords(csv_path: Path) -> set:
+    """CSV に書かれた英語キーワードの集合（小文字）を返す。読めなければ空集合。"""
+    import csv as _csv
+    kws = set()
+    try:
+        with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+            for row in _csv.DictReader(f):
+                for k in (row.get("Keywords") or "").split(","):
+                    k = k.strip().lower()
+                    if k:
+                        kws.add(k)
+    except Exception:
+        pass
+    return kws
+
+
+def _verify_csv_applied(page, csv_path: Path, log, label: str = "") -> bool:
+    """CSV が本当に適用されたかを、表示中の keyword が CSV の英語語彙と一致するかで判定する。
+
+    keyword チップの「個数」だけを見る判定では不十分。静止画には Pixta 用の**日本語**
+    IPTC/XMP が埋め込まれており、Shutterstock はアップロード時にそれを読む。そのため
+    CSV が一度も適用されていなくてもチップは付いてしまい、個数チェックは [OK] を返す。
+    実際に「keyword 76件」と出しながら CSV は全列未適用で、カテゴリーが空のまま
+    素材が未送信タブに滞留したことがある。
+    CSV は英語・埋め込みは日本語なので、語彙が重なるかどうかで切り分けられる。
+
+    カテゴリーは CSV 以外から入る経路が無いので、「CSV が適用されたか」を
+    正しく判定できれば、カテゴリー欠落も同時に検知できる。
+    """
+    prefix = f"{label}: " if label else ""
+    chip_loc = page.locator('[data-testid^="selected-keyword-"]')
+    try:
+        chips = chip_loc.count()
+    except Exception:
+        chips = 0
+
+    if chips == 0:
+        log(f"[!] {prefix}keyword未検出。CSV が適用されていない可能性が高い")
+        return False
+
+    expected = _csv_english_keywords(csv_path)
+    if not expected:
+        log(f"[OK] {prefix}CSVメタデータ反映確認（keyword {chips}件 / CSV語彙を読めず照合スキップ）")
+        return True
+
+    shown = set()
+    for i in range(min(chips, 60)):
+        try:
+            t = chip_loc.nth(i).inner_text().strip().lower()
+            if t:
+                shown.add(t)
+        except Exception:
+            pass
+
+    hit = len(shown & expected)
+    if hit == 0:
+        log(f"[!!] {prefix}CSV未適用の疑いが濃厚です。表示中の keyword {chips}件が CSV の英語 keyword と 1 つも一致しません")
+        log("     ファイル埋め込みの日本語メタデータが見えているだけで、CSV は効いていない可能性が高い")
+        log("     → CSV のヘッダー書式（引用符が付くと全列無視される）と Filename 列の一致を確認すること")
+        log("     → この状態ではカテゴリーが空のままなので提出できません")
+        return False
+
+    log(f"[OK] {prefix}CSVメタデータ反映確認（keyword {chips}件 / CSV語彙と {hit}件一致）")
+    return True
+
+
 def _apply_csv_on_tab(page, csv_path: Path, log, label: str) -> bool:
     """今開いているタブで CSV メタデータを適用する。成功したら全選択まで済ませて True を返す。
 
@@ -101,11 +220,7 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str) -> bool:
         # 全選択してから反映を確認する（reload は選択を解除し、送信ボタンを消すのでここで行う）
         _select_all(page, log)
         time.sleep(2)
-        chips = page.locator('[data-testid^="selected-keyword-"]').count()
-        if chips > 0:
-            log(f"[OK] {label}: CSVメタデータ反映確認（keyword {chips}件）")
-        else:
-            log(f"[!] {label}: keyword未検出のまま続行します")
+        _verify_csv_applied(page, csv_path, log, label)
         return True
     except Exception as e:
         log(f"[!] {label}: CSV適用に失敗しました（続行します）: {e}")
@@ -131,6 +246,12 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
 
     submitted = 0
     errors = []
+    # 提出ボタンを押しても「未送信」タブに残ってしまった素材
+    # （カテゴリー未設定など提出条件を満たしていないと、押しても提出されない）
+    unsubmitted = []
+    # カウンタを数値として読めず提出の成否を確認できなかったケース。
+    # 「読めなかった」を unsubmitted に混ぜると誤検知になるので分ける。
+    unverified = []
 
     _own_playwright = playwright_instance is None
     p = sync_playwright().start() if _own_playwright else playwright_instance
@@ -268,15 +389,11 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # ※ ページreloadは選択を解除し、送信ボタン（選択時のみ表示）を消してしまうため行わない
             _select_all(page, log)
             time.sleep(2)
-            kw_chips = page.locator('[data-testid^="selected-keyword-"]').count()
-            if kw_chips > 0:
-                log(f"[OK] CSVメタデータ反映確認（keyword {kw_chips}件）")
-            else:
-                log("[!] keyword未検出。10秒待って再選択し再確認...")
+            if not _verify_csv_applied(page, csv_path, log):
+                log("[!] 10秒待って再選択し再確認...")
                 time.sleep(10)
                 _ensure_all_selected(page, log)
-                kw_chips = page.locator('[data-testid^="selected-keyword-"]').count()
-                log(f"[!] 再確認: keyword {kw_chips}件")
+                _verify_csv_applied(page, csv_path, log)
 
             log("CSV適用完了")
 
@@ -284,6 +401,10 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # STEP 4: 画像を審査提出
             # ============================================================
             if skip_submit:
+                # 送信ボタンは素材が選択されている時のみ表示されるため、
+                # 手動操作できるよう選択済みの状態で停止する
+                log("\n>> [テストモード] 全ファイルを選択して停止します...")
+                _ensure_all_selected(page, log)
                 log("[テストモード] 審査提出ボタンの手前で停止します。ブラウザで手動操作してください。")
             else:
                 log("画像: 審査提出中...")
@@ -298,14 +419,11 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 except PWTimeout:
                     log("[NG] 提出ボタンが見つかりません")
 
-                try:
-                    tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                    if "(0)" in tab_text:
-                        log("[OK] 画像: 全件提出完了")
-                    else:
-                        log(f"[!] 画像: 未提出が残っています: {tab_text}")
-                except PWTimeout:
-                    log("[!] 画像: 提出後の確認ができませんでした")
+                state, tab_text = _wait_not_submitted_cleared(page, log, "画像")
+                if state == "remains":
+                    unsubmitted.append(("画像", tab_text))
+                elif state == "unknown":
+                    unverified.append(("画像", tab_text or "カウンタ読み取り不能"))
 
                 submitted_photo = submitted
                 submitted += 1  # カウントは概算
@@ -346,14 +464,11 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         except PWTimeout:
                             log("[NG] 動画: 提出ボタンが見つかりません")
 
-                        try:
-                            tab_text_after = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                            if "(0)" in tab_text_after:
-                                log("[OK] 動画: 全件提出完了")
-                            else:
-                                log(f"[!] 動画: 未提出が残っています: {tab_text_after}")
-                        except PWTimeout:
-                            log("[!] 動画: 提出後の確認ができませんでした")
+                        state, tab_text_after = _wait_not_submitted_cleared(page, log, "動画")
+                        if state == "remains":
+                            unsubmitted.append(("動画", tab_text_after))
+                        elif state == "unknown":
+                            unverified.append(("動画", tab_text_after or "カウンタ読み取り不能"))
 
                 except PWTimeout:
                     log("[!] 動画: not_submittedタブの確認ができませんでした")
@@ -391,7 +506,12 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             p.stop()
         raise
 
-    return {"submitted": submitted, "errors": errors}
+    return {
+        "submitted": submitted,
+        "errors": errors,
+        "unsubmitted": unsubmitted,
+        "unverified": unverified,
+    }
 
 
 if __name__ == "__main__":

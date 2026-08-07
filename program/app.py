@@ -130,6 +130,75 @@ def save_config(config: dict):
         json.dump(save_data, f, ensure_ascii=False, indent=2)
 
 # ============================================================
+# CSV ヘッダー正規化（ポータル適用前の最後の砦）
+# ============================================================
+
+EXPECTED_CSV_HEADERS = {
+    "adobe_stock_": ["Filename", "Title", "Keywords", "Category", "Releases"],
+    "shutterstock_": ["Filename", "Description", "Keywords", "Categories",
+                      "Editorial", "Mature content", "illustration"],
+}
+
+
+def normalize_csv_header(path, progress_cb=None):
+    """CSV のヘッダー行を正規の書式に直す。
+
+    Adobe Stock / Shutterstock はヘッダー名の**完全一致**で列を判定するため、
+    列名に引用符が付くなど 1 文字でも違うと CSV が丸ごと無視され、説明・
+    キーワード・カテゴリーが未適用のまま「ご注意ください」で提出できなくなる。
+    Excel で開いて保存し直した CSV などはヘッダーが `"Filename","Description",...`
+    のように全項目引用符付きになることがあり、これに該当する。
+
+    csv.reader はクォートを解除して読むので、読み直して csv.writer で書き戻せば
+    クォート由来の破損は機械的に正規化できる。列名そのものが違う場合は
+    別物の可能性があるため書き換えず警告だけ出す。
+    戻り値は常に path（呼び出し側をそのまま通す）。
+    """
+    if path is None:
+        return None
+    import csv as _csv
+
+    name = Path(path).name
+    expected = None
+    for prefix, hdr in EXPECTED_CSV_HEADERS.items():
+        if name.startswith(prefix):
+            expected = hdr
+            break
+    if expected is None:
+        return path
+
+    canonical = ",".join(expected)
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            raw_first = f.readline().rstrip("\r\n")
+        if raw_first == canonical:
+            return path  # 正常。触らない
+
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            rows = [r for r in _csv.reader(f) if any(cell.strip() for cell in r)]
+        if not rows:
+            return path
+
+        parsed = [c.strip() for c in rows[0]]
+        if parsed != expected:
+            if progress_cb:
+                progress_cb(f"  [!] CSVヘッダーが想定と不一致（列名相違のため自動修復せず）: {name} -> {parsed}")
+            return path
+
+        # 列名は合っているので破損は書式のみ → 正規の形式で書き戻す
+        with open(path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = _csv.writer(f)
+            writer.writerow(expected)
+            writer.writerows(rows[1:])
+        if progress_cb:
+            progress_cb(f"  [CSV] ヘッダー書式を正規形式に修復しました: {name}")
+    except Exception as e:
+        if progress_cb:
+            progress_cb(f"  [!] CSVヘッダー検証に失敗（そのまま続行）: {e}")
+    return path
+
+
+# ============================================================
 # csv_output の同サイト CSV マージ
 # ============================================================
 
@@ -145,6 +214,10 @@ def merge_site_csvs(csv_list, progress_cb=None):
     """
     if not csv_list:
         return None
+    # マージの有無に関わらず、適用対象になる CSV は必ずヘッダー書式を検証・修復する
+    # （CSV が 1 枚だけの日はマージが走らないため、ここを通さないと素通りする）
+    for _p in csv_list:
+        normalize_csv_header(_p, progress_cb)
     if len(csv_list) == 1:
         return csv_list[0]
 
@@ -1132,7 +1205,25 @@ class StockTaggerApp:
                     no_wait=self.test_mode,
                     playwright_instance=_pw,
                 )
-                log(f"[OK] Shutterstock ポータル提出完了: {ss_portal_result['submitted']}件")
+                # submitted は概算カウントなので成否判定に使わない。
+                # 「未送信」タブに残った素材があるかどうかだけが本当の成否
+                # （カテゴリー未設定などで提出条件を満たさないと、提出を押しても残る）。
+                unver = ss_portal_result.get("unverified") or []
+                if unver:
+                    detail_uv = " / ".join(f"{lbl} {txt}" for lbl, txt in unver)
+                    log(f"[!] Shutterstock: 提出の成否を確認できませんでした（{detail_uv}）")
+                    log("     未提出が残っているとは限りません。次回実行時に再確認されます。")
+
+                unsub = ss_portal_result.get("unsubmitted") or []
+                if unsub:
+                    detail = " / ".join(f"{lbl} {txt}" for lbl, txt in unsub)
+                    log(f"[NG] Shutterstock: 提出されず「未送信」に残った素材があります（{detail}）")
+                    log("     カテゴリー未設定など、提出条件を満たしていない可能性が高い状態です。")
+                    log("     ポータルの未送信タブを確認してください。")
+                    log("     ファイルはアップロード済みのため、再アップロードは不要・厳禁です。")
+                    manual_services.append(("Shutterstock", f"未提出が残っています（{detail}）"))
+                else:
+                    log("[OK] Shutterstock ポータル提出完了: 全件提出済み")
                 self._uploaded_sites.add("shutterstock")
             except Exception as e:
                 log(f"[NG] Shutterstock エラー: {e}")
