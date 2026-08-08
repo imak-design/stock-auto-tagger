@@ -62,6 +62,13 @@ def _ensure_all_selected(page, log):
 def _wait_not_submitted_cleared(page, log, label, timeout=90, reload_every=15):
     """「未送信」タブのカウンタが (0) になるまで reload しながら待つ。
 
+    ★このカウンタは写真と動画を**合算した「未送信」全体の残数**であり、いま開いている
+      種別だけの残数ではない。→ **写真・動画の提出が両方終わってから 1 回だけ**呼ぶこと。
+      写真の提出直後に呼ぶと、まだ提出していない動画の分を
+      「提出できなかった写真」として誤検知する。
+      根拠: アップロード確認が `current >= expected`（expected = 写真+動画の合計）で
+      成立している。種別ごとのカウンタならこの判定は成立しない。
+
     提出直後のカウンタは、ポータル側が数字を取り直して描き直すまで**提出前の値**を
     表示したままになる。提出ボタンを押して 4 秒待って 1 回読むだけだと、実際は全件提出
     できているのに「未提出が残っています」と誤って警告していた。
@@ -419,12 +426,12 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 except PWTimeout:
                     log("[NG] 提出ボタンが見つかりません")
 
-                state, tab_text = _wait_not_submitted_cleared(page, log, "画像")
-                if state == "remains":
-                    unsubmitted.append(("画像", tab_text))
-                elif state == "unknown":
-                    unverified.append(("画像", tab_text or "カウンタ読み取り不能"))
-
+                # ★ここでは成否を判定しない。
+                #   「未送信」カウンタは写真+動画を合算した全体の残数なので、
+                #   この時点ではまだ提出していない動画の分が必ず残って見える。
+                #   （写真提出直後「未送信 (1)」→ 動画タブでも同じ「未送信 (1)」→
+                #     動画提出後に (0)。写真は最初から全件提出できていた）
+                #   → 判定は写真・動画の提出が両方終わった STEP 5 で 1 回だけ行う。
                 submitted_photo = submitted
                 submitted += 1  # カウントは概算
 
@@ -440,7 +447,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                     tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
                     log(f"動画 not_submitted: {tab_text}")
                     if "(0)" in tab_text:
-                        log("未提出動画なし。スキップ")
+                        # 合算カウンタが 0 = 写真も動画も残っていない。
+                        # ここが写真提出の成否確認も兼ねる（種別ごとの数字は取れないため）。
+                        log("[OK] 未送信タブ: 全件提出完了（写真・動画とも残りなし）")
                     else:
                         log("動画: 全選択して提出...")
                         try:
@@ -464,14 +473,19 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         except PWTimeout:
                             log("[NG] 動画: 提出ボタンが見つかりません")
 
-                        state, tab_text_after = _wait_not_submitted_cleared(page, log, "動画")
+                        # ★写真・動画の提出が両方終わったのでここで 1 回だけ判定する。
+                        #   カウンタは合算なので、残っていても種別は特定できない。
+                        #   ラベルは「未送信」にして、写真のせいだと決めつけない。
+                        state, tab_text_after = _wait_not_submitted_cleared(page, log, "未送信")
                         if state == "remains":
-                            unsubmitted.append(("動画", tab_text_after))
+                            unsubmitted.append(("未送信", tab_text_after))
                         elif state == "unknown":
-                            unverified.append(("動画", tab_text_after or "カウンタ読み取り不能"))
+                            unverified.append(("未送信", tab_text_after or "カウンタ読み取り不能"))
 
                 except PWTimeout:
                     log("[!] 動画: not_submittedタブの確認ができませんでした")
+                    # 写真側の判定もここに集約したので、読めなかった = 未検証として残す
+                    unverified.append(("未送信", "カウンタ読み取り不能"))
 
         except Exception as e:
             log(f"[NG] Error: {e}")
