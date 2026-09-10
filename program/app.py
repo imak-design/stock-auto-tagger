@@ -1740,7 +1740,7 @@ class StockTaggerApp:
             return
 
         # --- 開始前確認ダイアログ ---
-        confirm_targets = list(all_targets) + photo_files
+        confirm_targets = list(all_targets) + photo_files + vector_zip_files
         file_list = "\n".join(f"  {f.name}" for f in confirm_targets[:10])
         if len(confirm_targets) > 10:
             file_list += f"\n  ...他{len(confirm_targets) - 10}件"
