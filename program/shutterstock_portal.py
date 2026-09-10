@@ -16,6 +16,13 @@ PHOTO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/photo"
 VIDEO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/video"
 
 
+# CSV を当ててから画面に反映されるまで待つ上限と、その間の再確認間隔。
+# 反映されれば即抜けるので、速い日に待たされることはない。効かない日は何分待っても
+# 入らない（Shutterstock 側が無音で無視している）ので、打ち切って戻り値で上へ伝える。
+CSV_REFLECT_TIMEOUT_S = 120
+CSV_REFLECT_POLL_S = 20
+
+
 def _close_popups(page):
     try:
         close_btn = page.locator('[data-testid="announcement-close"]').first
@@ -185,21 +192,77 @@ def _verify_csv_applied(page, csv_path: Path, log, label: str = "") -> bool:
     return True
 
 
-def _apply_csv_on_tab(page, csv_path: Path, log, label: str) -> bool:
-    """今開いているタブで CSV メタデータを適用する。成功したら全選択まで済ませて True を返す。
+def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
+                        timeout_s: int = CSV_REFLECT_TIMEOUT_S) -> bool:
+    """CSV が画面に反映されるまで、ページを更新しながら待つ。
 
-    CSV 適用は元々 写真タブでしか行っていなかったが、「CSVをアップロード」ボタンは
-    そのタブに素材が 1 つも無いと画面に存在しない。静止画が無い日は CSV が一度も当たらず、
-    動画が説明もキーワードも空のまま「未送信」に滞留する（2026-08-01 判明）。
+    Shutterstock 側は CSV を受け取ってから実際に各素材へ反映するまでに多少のラグがある。
+    その間は説明・カテゴリー・キーワードがすべて空のまま見える（CSV が壊れているわけでは
+    ない）。従来の「固定 4+5 秒 → reload → 1 回確認」では届かず、毎回 keyword未検出 →
+    カテゴリー空のまま提出 →「未送信」に滞留していた。
 
-    失敗しても例外にしない。ここで落とすと後続の処理まで巻き添えになるため。
+    ただし待ち上限は短くてよい（2026-09-03 に 10 分 → 2 分）。効く日は 1 回目の確認で
+    通り、効かない日は何分待っても永久に入らない（SS 側が CSV を無音で無視している）。
+    長く待っても判定は変わらないので、打ち切って False を返し先へ進む。**呼び出し元は
+    この False を握り潰さないこと**（ファイル移動を止める判断材料になる）。
+
+    反映を検知したら即座に True を返すので、速い日は待たされない。
+    """
+    prefix = f"{label}: " if label else ""
+    deadline = time.time() + timeout_s
+    attempt = 0
+    while True:
+        attempt += 1
+        _close_popups(page)
+        _select_all(page, log)
+        time.sleep(2)
+        if _verify_csv_applied(page, csv_path, log, label):
+            if attempt > 1:
+                log(f"[OK] {prefix}CSV 反映を確認（{attempt} 回目 / 約 {int(time.time() - (deadline - timeout_s))} 秒）")
+            return True
+        if time.time() >= deadline:
+            log(f"[!] {prefix}CSV 反映を {timeout_s} 秒待っても確認できませんでした。"
+                f"待つのを打ち切って次へ進みます（「未送信」に残る可能性があります）")
+            return False
+        remain = int(deadline - time.time())
+        log(f"[..] {prefix}CSV 反映待ち（{attempt} 回目 / 残り約 {remain} 秒）"
+            f"{CSV_REFLECT_POLL_S} 秒後に更新して再確認します")
+        time.sleep(CSV_REFLECT_POLL_S)
+        try:
+            page.reload(wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            log(f"[!] {prefix}更新に失敗（続行）: {e}")
+        time.sleep(3)
+
+
+def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
+    """今開いているタブで CSV メタデータを適用する。
+
+    戻り値は `(ok, reflected)` の 2 要素タプル。
+      ok        … CSV をセットする一連の操作が最後まで通ったか（True なら全選択まで済んでいる）
+      reflected … その CSV が実際に画面へ反映されたことを確認できたか
+
+    **reflected=False を握り潰さないこと。** 2026-08-19〜08-22 の 4 日間、CSV が一度も
+    適用されないまま「警告をログに出して続行」し、空メタデータで提出 →「未送信」に滞留 →
+    それでもファイル移動と CSV のゴミ箱送りが走り、マスターが毎日ゴミ箱から CSV を
+    拾って手作業でメタデータを入れ直す羽目になった。呼び出し元は reflected を
+    run_portal_automation の戻り値 `csv_unapplied` に積み、app.py 側でファイル移動を
+    止める判断材料にする。
+
+    CSV 適用は元々 写真タブ (STEP 3) でしか行っていなかったが、「CSVをアップロード」ボタンは
+    そのタブに素材が 1 つも無いと画面に存在しない。静止画が無い日（fx 動画だけの日）は
+    CSV が一度も当たらず、動画が説明もキーワードも空のまま「未送信」に滞留していた
+    （2026-08-01 判明: 魔法陣動画 6 本が 1 週間分積み上がっていた）。
+
+    失敗しても例外にしない（ここで落とすとブラウザの後始末まで巻き添えになる）。
+    代わりに戻り値で必ず上へ伝える。
     """
     try:
         csv_btn = page.locator('button[data-testid="csv-upload"]')
         csv_btn.wait_for(state="visible", timeout=8000)
     except PWTimeout:
         log(f"[!] {label}: CSVアップロードボタンが見つかりません。CSV適用をスキップします")
-        return False
+        return False, False
 
     try:
         log(f"{label}: CSV適用中: {csv_path.name}")
@@ -222,16 +285,15 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str) -> bool:
 
         page.reload(wait_until="domcontentloaded", timeout=30000)
         time.sleep(5)
-        _close_popups(page)
 
-        # 全選択してから反映を確認する（reload は選択を解除し、送信ボタンを消すのでここで行う）
-        _select_all(page, log)
-        time.sleep(2)
-        _verify_csv_applied(page, csv_path, log, label)
-        return True
+        # 反映を更新しながら待つ（上限 CSV_REFLECT_TIMEOUT_S。超えたら諦めて先へ進む）。
+        # 全選択は _wait_csv_reflected の中で毎回やり直す
+        # （reload は選択を解除し、送信ボタンを消すため）。
+        reflected = _wait_csv_reflected(page, csv_path, log, label)
+        return True, reflected
     except Exception as e:
-        log(f"[!] {label}: CSV適用に失敗しました（続行します）: {e}")
-        return False
+        log(f"[!] {label}: CSV適用に失敗しました: {e}")
+        return False, False
 
 
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
@@ -259,6 +321,10 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
     # カウンタを数値として読めず提出の成否を確認できなかったケース。
     # 「読めなかった」を unsubmitted に混ぜると誤検知になるので分ける。
     unverified = []
+    # CSV を当てたのに画面へ反映されなかったタブのラベル（"画像" / "動画"）。
+    # 空でなければ、その素材は説明・キーワード・カテゴリーが入っていない。
+    # app.py はこれを見てファイル移動を止める。
+    csv_unapplied = []
 
     _own_playwright = playwright_instance is None
     p = sync_playwright().start() if _own_playwright else playwright_instance
@@ -392,17 +458,16 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             time.sleep(5)
             _close_popups(page)
 
-            # 全選択 → CSVメタデータ反映を確認（keywordチップが付けば適用済み）
-            # ※ ページreloadは選択を解除し、送信ボタン（選択時のみ表示）を消してしまうため行わない
-            _select_all(page, log)
-            time.sleep(2)
-            if not _verify_csv_applied(page, csv_path, log):
-                log("[!] 10秒待って再選択し再確認...")
-                time.sleep(10)
-                _ensure_all_selected(page, log)
-                _verify_csv_applied(page, csv_path, log)
-
-            log("CSV適用完了")
+            # CSVメタデータ反映を待つ（上限 CSV_REFLECT_TIMEOUT_S。超えたら諦めて先へ進む）。
+            # 全選択は _wait_csv_reflected が毎回やり直す
+            # （reload は選択を解除し、送信ボタンを消すため）。
+            if _wait_csv_reflected(page, csv_path, log):
+                log("CSV適用完了")
+            else:
+                # 反映を確認できないまま提出しても、必須項目が空なので「未送信」に残るだけ。
+                # ここで握り潰すと後段のファイル移動まで走ってしまうので、必ず戻り値に載せる。
+                log("[NG] 画像: CSV が適用されていません。ファイル移動を止めます")
+                csv_unapplied.append("画像")
 
             # ============================================================
             # STEP 4: 画像を審査提出
@@ -461,8 +526,12 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         # 写真タブでの適用は、その日に静止画が無いと「CSVをアップロード」ボタン自体が
                         # 存在せず実行できない。動画だけの日に動画のメタデータが空のまま残るのを防ぐ。
                         # 成功時は全選択まで済むので、失敗したときだけ従来どおり全選択する。
-                        if not _apply_csv_on_tab(page, csv_path, log, "動画"):
+                        _video_ok, _video_reflected = _apply_csv_on_tab(page, csv_path, log, "動画")
+                        if not _video_ok:
                             _select_all(page, log)
+                        if not _video_reflected:
+                            log("[NG] 動画: CSV が適用されていません。ファイル移動を止めます")
+                            csv_unapplied.append("動画")
 
                         submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
                         try:
@@ -525,6 +594,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
         "errors": errors,
         "unsubmitted": unsubmitted,
         "unverified": unverified,
+        "csv_unapplied": csv_unapplied,
     }
 
 

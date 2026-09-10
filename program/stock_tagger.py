@@ -863,8 +863,19 @@ def embed_pixta_metadata(results: list, progress_callback=None) -> int:
 # EPS XMP メタデータ埋め込み
 # ============================================================
 
-def embed_eps_xmp(eps_path: Path, title: str, keywords: list):
-    """既存Illustrator XMP構造を維持し dc:title と dc:subject だけ置換/挿入。バイナリEPSヘッダー対応"""
+def embed_eps_xmp(eps_path: Path, title: str, keywords: list) -> bool:
+    """既存Illustrator XMP構造を維持し dc:title と dc:subject だけ置換/挿入。バイナリEPSヘッダー対応。
+
+    XMPパケットだけをバイト位置で切り出してUTF-8として扱い、PostScript本体（バイナリを含む）
+    には一切触らない。
+
+    以前は PS 全体を latin-1 で decode し、XMPパケットだけ utf-8 で encode し直していた。
+    これだとXMP内の既存の非ASCIIバイトが実行のたびに二重エンコードされ、
+    `<?xpacket begin="﻿"` のBOM (EF BB BF) が実行ごとに膨らんでいた
+    （3バイト → 6 → 12 …）。ZIP作成のたびに埋め込み直す運用にしたため 2026-08-06 に修正。
+
+    Returns: 埋め込めたら True / XMPパケットが無くて何もしなかったら False
+    """
     import re as _re
 
     with open(eps_path, "rb") as f:
@@ -880,7 +891,24 @@ def embed_eps_xmp(eps_path: Path, title: str, keywords: list):
     else:
         ps_data = raw
 
-    text = ps_data.decode("latin-1")
+    # XMPパケットの範囲をバイトで特定する
+    xmp_start = ps_data.find(b"<?xpacket begin=")
+    xmp_end_marker = ps_data.find(b"<?xpacket end=")
+    if xmp_start < 0 or xmp_end_marker < 0:
+        # EPS8 など XMP を持たない保存形式。壊さずに何もしないで返す
+        # （呼び出し側が _eps_pixta_xmp_status で検証して警告する）
+        return False
+    xmp_end = ps_data.index(b"?>", xmp_end_marker) + 2  # <?xpacket end="w"?> の末尾
+
+    text = ps_data[xmp_start:xmp_end].decode("utf-8")
+
+    # 旧実装で二重エンコードされた `<?xpacket begin="..."` のBOMを正規のU+FEFFに戻す
+    text = _re.sub(
+        r'(<\?xpacket begin=")[^"]*(" id=)',
+        lambda m: m.group(1) + "﻿" + m.group(2),
+        text,
+        count=1,
+    )
 
     # バックアップ
     bak = eps_path.with_suffix(eps_path.suffix + ".bak")
@@ -911,27 +939,15 @@ def embed_eps_xmp(eps_path: Path, title: str, keywords: list):
         '          </rdf:Bag>\n'
         '        </dc:subject>'
     )
+    # 置換文字列は lambda で渡す（キーワードに \ や \g が来ても壊れないように）
     if _re.search(subject_pattern, text, _re.DOTALL):
-        text = _re.sub(subject_pattern, new_subject, text, flags=_re.DOTALL)
+        text = _re.sub(subject_pattern, lambda m: new_subject, text, flags=_re.DOTALL)
     else:
         insert_point = text.find("</rdf:Description>")
         if insert_point != -1:
             text = text[:insert_point] + '      ' + new_subject + '\n' + text[insert_point:]
 
-    # XMP部分はUTF-8を含むのでlatin-1では不可。
-    # XMPパケット内だけUTF-8エンコードし、それ以外はlatin-1のまま保持する。
-    xmp_start_marker = '<?xpacket begin='
-    xmp_end_marker = '<?xpacket end='
-    xmp_start = text.find(xmp_start_marker)
-    xmp_end = text.find(xmp_end_marker)
-    if xmp_start != -1 and xmp_end != -1:
-        xmp_end = text.index('?>', xmp_end) + 2  # <?xpacket end="w"?> の末尾
-        before = text[:xmp_start].encode("latin-1")
-        xmp_part = text[xmp_start:xmp_end].encode("utf-8")
-        after = text[xmp_end:].encode("latin-1")
-        ps_data_new = before + xmp_part + after
-    else:
-        ps_data_new = text.encode("latin-1", errors="xmlcharrefreplace")
+    ps_data_new = ps_data[:xmp_start] + text.encode("utf-8") + ps_data[xmp_end:]
 
     if binary_header:
         new_ps_length = len(ps_data_new)
@@ -962,6 +978,8 @@ def embed_eps_xmp(eps_path: Path, title: str, keywords: list):
     else:
         with open(eps_path, "wb") as f:
             f.write(ps_data_new)
+
+    return True
 
 
 # ============================================================
@@ -1058,11 +1076,11 @@ def _rename_get_keyword_and_colors(api_key: str, images_data: list) -> dict:
     for mime, data in images_data:
         parts.append({"inline_data": {"mime_type": mime, "data": data}})
     parts.append({"text": (
-        f"These {len(images_data)} images are all color variations of the same stock illustration with a black background.\n"
-        "1. Provide a single English keyword (lowercase, no spaces) describing the visual style "
-        "(e.g. 'lightstreak', 'lightswoosh', 'starburst').\n"
-        "2. For each image (in order), identify the main color of the subject or effect in the foreground. "
-        "Ignore the black background. Use a single lowercase English color name "
+        f"These {len(images_data)} images are color variations of the same stock illustration.\n"
+        "1. Provide a single English keyword (lowercase, no spaces) describing what the illustration depicts "
+        "(e.g. 'lightstreak', 'lightswoosh', 'starburst', 'arrow', 'frame').\n"
+        "2. For each image (in order), identify the main color of the subject. "
+        "Use a single lowercase English color name "
         "(e.g. red, blue, cyan, pink, green, yellow, white, purple, orange).\n\n"
         "Reply in this exact format (no extra text):\n"
         "keyword: <keyword>\n"

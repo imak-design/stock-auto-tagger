@@ -1087,6 +1087,10 @@ class StockTaggerApp:
         csv_folder = folder_path / "csv_output"
         failed_services = []  # エラーが発生したサービス名を記録
         manual_services = []  # 手動対応待ちのサービス [(名前, 理由)]（エラーではない）
+        # ファイル移動をブロックする問題 [(名前, 理由)]。例外ではないが「素材を元の場所から
+        # 動かしてはいけない」状態を表す。CSV が当たっていない・提出できていない素材を
+        # 移動してしまうと、手で直すための材料が散ってしまう。
+        blocking_issues = []
         enabled_sites = self._get_enabled_sites()
 
         # ---- Adobe Stock（全素材を1回でアップロード）----
@@ -1214,6 +1218,17 @@ class StockTaggerApp:
                     log(f"[!] Shutterstock: 提出の成否を確認できませんでした（{detail_uv}）")
                     log("     未提出が残っているとは限りません。次回実行時に再確認されます。")
 
+                # CSV が画面に反映されなかった = 説明・キーワード・カテゴリーが空のまま。
+                # この状態で素材を移動すると、あとで手直しする材料が分からなくなる。
+                csv_bad = ss_portal_result.get("csv_unapplied") or []
+                if csv_bad:
+                    detail_csv = " / ".join(csv_bad)
+                    log(f"[NG] Shutterstock: CSV が適用されていません（{detail_csv}）")
+                    log("     説明・キーワード・カテゴリーが空のままです。")
+                    log("     ファイルはアップロード済みのため、再アップロードは不要・厳禁です。")
+                    log("     CSV は csv_output に残してあります。ポータルで当て直してください。")
+                    blocking_issues.append(("Shutterstock", f"CSV が適用されていません（{detail_csv}）"))
+
                 unsub = ss_portal_result.get("unsubmitted") or []
                 if unsub:
                     detail = " / ".join(f"{lbl} {txt}" for lbl, txt in unsub)
@@ -1221,8 +1236,8 @@ class StockTaggerApp:
                     log("     カテゴリー未設定など、提出条件を満たしていない可能性が高い状態です。")
                     log("     ポータルの未送信タブを確認してください。")
                     log("     ファイルはアップロード済みのため、再アップロードは不要・厳禁です。")
-                    manual_services.append(("Shutterstock", f"未提出が残っています（{detail}）"))
-                else:
+                    blocking_issues.append(("Shutterstock", f"未提出が残っています（{detail}）"))
+                elif not csv_bad:
                     log("[OK] Shutterstock ポータル提出完了: 全件提出済み")
                 self._uploaded_sites.add("shutterstock")
             except Exception as e:
@@ -1343,10 +1358,15 @@ class StockTaggerApp:
 
         # ---- ファイル移動（自動） ----
         log("\n" + "─" * 40)
-        if failed_services:
-            log(f"[!] 以下のサービスでエラーが発生したため、ファイル移動をスキップしました:")
+        if failed_services or blocking_issues:
+            log(f"[!] 以下の問題があるため、ファイル移動をスキップしました:")
             for svc in failed_services:
                 log(f"    • {svc}")
+            for _n, _r in blocking_issues:
+                log(f"    • {_n}: {_r}")
+            log("    素材も CSV も元の場所に残してあります。")
+            log("    ※ 素材が残っている = パイプラインを丸ごと再実行すると、")
+            log("       成功済みのサイトへ二重登録されます。全体の再実行は厳禁。")
             log("    問題を解消した後、【工程5】ボタンで手動移動してください。")
             def on_pipeline_error():
                 self._stop_timer()
@@ -1354,7 +1374,10 @@ class StockTaggerApp:
                 self.is_running = False
                 self._enable_all_btns()
                 self._enable_btn(self.move_btn, bg="#e94560")
-                svc_list = "\n".join(f"• {s}" for s in failed_services)
+                svc_list = "\n".join(
+                    [f"• {s}" for s in failed_services]
+                    + [f"• {n}: {r}" for n, r in blocking_issues]
+                )
                 manual_note = ""
                 if manual_services:
                     manual_note = "\n\n［要手動対応］以下は審査提出が完了していません:\n" + "\n".join(
@@ -1362,8 +1385,9 @@ class StockTaggerApp:
                     ) + "\n開いているブラウザで手動提出してください。"
                 self._show_topmost_popup(
                     "一部エラーあり",
-                    f"以下のサービスでエラーが発生しました:\n{svc_list}\n\n"
-                    f"ファイル移動をスキップしました。{manual_note}",
+                    f"以下の問題が発生しました:\n{svc_list}\n\n"
+                    f"ファイル移動をスキップしました。\n"
+                    f"素材と CSV は元の場所に残っています。{manual_note}",
                     error=True
                 )
             self.root.after(0, on_pipeline_error)

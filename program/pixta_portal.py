@@ -135,6 +135,58 @@ def _goto_upload_page(page, url: str, log, attempts: int = 4, wait_sec: int = 45
     )
 
 
+# 審査申請のページ送り上限。通常は1〜数ページで終わる。
+# 登録ボタンが通らないと同じ件数を選び直し続けるため、上限で必ず止める。
+MAX_SUBMIT_PAGES = 20
+
+
+def _pending_item_ids(page) -> list:
+    """ペンディングリストの作品IDを返す（登録が進んだかの判定用）"""
+    try:
+        return page.locator("input.submit_items").evaluate_all(
+            "els => els.map(e => e.value || e.id || '')"
+        )
+    except Exception:
+        return []
+
+
+def _page_error_texts(page) -> list:
+    """登録が通らなかった理由（ページ上のバリデーションエラー）を拾う"""
+    texts = []
+    for sel in (
+        "#item_submit_form .error",
+        "#item_submit_form .errors",
+        ".error-message",
+        ".alert",
+        "p.error",
+        "span.error",
+    ):
+        try:
+            for t in page.locator(sel).all_inner_texts():
+                t = " ".join(t.split())
+                if t and t not in texts:
+                    texts.append(t)
+        except Exception:
+            pass
+    return texts[:10]
+
+
+def _raise_no_progress(page, remaining: int):
+    """登録を押しても件数が減らないときに、原因の手掛かりを添えて中断する"""
+    reasons = _page_error_texts(page)
+    if reasons:
+        detail = "ページ上のエラー表示: " + " / ".join(reasons)
+    else:
+        detail = (
+            "ページ上にエラー表示は見つかりませんでした。"
+            "タイトル・タグが未設定（EPS/画像にPIXTA用メタデータが埋め込まれていない）可能性が高いです。"
+        )
+    raise RuntimeError(
+        f"登録ボタンを押しても {remaining} 件が未申請のまま残っています（URL: {page.url}）。"
+        f"同じ作品を選び直す無限ループを避けるため中断しました。{detail}"
+    )
+
+
 def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool = False, is_ai: bool = False, is_photo: bool = False, ai_filenames: set = None, no_wait: bool = False, playwright_instance=None) -> dict:
     """
     Pixta イラストアップロード → 審査申請 を全自動で実行する。
@@ -318,6 +370,11 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
             page_num = 0
             while True:
                 page_num += 1
+                if page_num > MAX_SUBMIT_PAGES:
+                    raise RuntimeError(
+                        f"審査申請のページ処理が上限 {MAX_SUBMIT_PAGES} 回を超えました。"
+                        "無限ループを避けるため中断します。"
+                    )
                 log(f"--- ページ {page_num} の処理 ---")
 
                 # AI素材: 全選択の前に各アイテムのAI生成チェックボックスをON
@@ -363,6 +420,8 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                     log("[テストモード] 全選択完了。登録ボタンの手前で停止します。ブラウザで手動操作してください。")
                     break
 
+                before_ids = _pending_item_ids(page)
+
                 log("Clicking register button...")
                 reg_btn = page.locator("input[value='選択した作品を登録']")
                 reg_btn.wait_for(state="visible", timeout=5000)
@@ -370,17 +429,24 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                 time.sleep(4)
                 log(f"After register URL: {page.url}")
 
-                # 登録後にまだアップロードページにいる場合 → 次ページの作品がある
-                if "confirm" not in page.url:
-                    # まだ残りがある可能性: ページをリロードして次の作品を処理
-                    remaining = page.locator("input.submit_items").count()
-                    if remaining > 0:
-                        log(f"残り {remaining} 件の作品があります。次のページを処理します...")
-                        time.sleep(2)
-                        continue
-                    else:
-                        raise RuntimeError(f"Expected confirm page but got: {page.url}")
-                break
+                if "confirm" in page.url:
+                    break
+
+                # 確認ページに行かなかった = 登録が通っていない可能性がある。
+                # 一覧を開き直して「実際に減ったか」で次ページ有無を判定する。
+                # 減っていないのに continue すると同じ作品を選び直し続ける。
+                _goto_upload_page(page, url, log)
+                after_ids = _pending_item_ids(page)
+
+                if not after_ids:
+                    log("未申請の作品がなくなりました。")
+                    break
+
+                if set(after_ids) == set(before_ids):
+                    _raise_no_progress(page, len(after_ids))
+
+                log(f"残り {len(after_ids)} 件の作品があります。次のページを処理します...")
+                time.sleep(2)
 
             checked_count = total_submitted_pages
             log(f"Total items selected across all pages: {checked_count}")
@@ -473,7 +539,8 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
     return {"uploaded": uploaded, "submitted": submitted, "errors": errors}
 
 
-def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = False) -> dict:
+def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = False,
+               ai_filenames: set = None) -> dict:
     """
     ファイルがすでにPixtaにアップロード済みの場合に、審査申請のみ実行する。
 
@@ -519,6 +586,11 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
             page_num = 0
             while True:
                 page_num += 1
+                if page_num > MAX_SUBMIT_PAGES:
+                    raise RuntimeError(
+                        f"審査申請のページ処理が上限 {MAX_SUBMIT_PAGES} 回を超えました。"
+                        "無限ループを避けるため中断します。"
+                    )
                 log(f"--- ページ {page_num} の処理 ---")
 
                 # AI素材: 全選択の前に各アイテムのAI生成チェックボックスをON
@@ -560,6 +632,8 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
 
                 total_submitted_pages += checked_count
 
+                before_ids = _pending_item_ids(page)
+
                 log("Clicking register button...")
                 reg_btn = page.locator("input[value='選択した作品を登録']")
                 reg_btn.wait_for(state="visible", timeout=5000)
@@ -567,18 +641,30 @@ def run_submit(progress_callback=None, is_ai: bool = False, is_photo: bool = Fal
                 time.sleep(4)
                 log(f"After register URL: {page.url}")
 
-                if "confirm" not in page.url:
-                    remaining = page.locator("input.submit_items").count()
-                    if remaining > 0:
-                        log(f"残り {remaining} 件の作品があります。次のページを処理します...")
-                        time.sleep(2)
-                        continue
-                    else:
-                        raise RuntimeError(f"Expected confirm page but got: {page.url}")
-                break
+                if "confirm" in page.url:
+                    break
+
+                # 確認ページに行かなかった = 登録が通っていない可能性がある。
+                # 一覧を開き直して「実際に減ったか」で次ページ有無を判定する。
+                # 減っていないのに continue すると同じ作品を選び直し続ける。
+                _goto_upload_page(page, url, log)
+                after_ids = _pending_item_ids(page)
+
+                if not after_ids:
+                    log("未申請の作品がなくなりました。")
+                    break
+
+                if set(after_ids) == set(before_ids):
+                    _raise_no_progress(page, len(after_ids))
+
+                log(f"残り {len(after_ids)} 件の作品があります。次のページを処理します...")
+                time.sleep(2)
 
             checked_count = total_submitted_pages
             log(f"Total items selected across all pages: {checked_count}")
+
+            if "confirm" not in page.url:
+                raise RuntimeError(f"Expected confirm page but got: {page.url}")
 
             log("Waiting for confirm page to fully load...")
             page.wait_for_load_state("networkidle", timeout=30000)
