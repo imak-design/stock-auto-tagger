@@ -1552,16 +1552,6 @@ def get_vector_zip_files(input_folder: Path) -> list:
     return result
 
 
-def create_vector_zip(subfolder: Path, eps_path: Path, png_path: Path) -> Path:
-    import zipfile
-    zip_path = subfolder / f"{eps_path.stem}.zip"
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.write(str(eps_path), eps_path.name)
-        zf.write(str(png_path), png_path.name)
-    return zip_path
-
-
-
 def process_vector_files(input_folder: str, api_key: str, progress_callback=None) -> dict:
     input_path = Path(input_folder)
     subfolders = get_vector_subfolders(input_path)
@@ -1674,31 +1664,26 @@ def process_vector_files(input_folder: str, api_key: str, progress_callback=None
     return {"success": len(results), "errors": errors, "results": results}
 
 
-def prepare_vector_zips_with_xmp(input_folder: str, vector_results: list, progress_callback=None) -> list:
-    zips = []
-    if not vector_results:
-        return zips
+def collect_vector_zips(input_folder: str, progress_callback=None) -> list:
+    """Vector/<素材名>/ に置かれた PIXTA 用 ZIP をそのまま集める。ツールでは作らない。
 
+    PIXTA のベクター入稿は「対応する JPEG と EPS をまとめた ZIP。PNG は任意の追加」。
+    透過素材かどうかで中身が変わり、EPS とラスタの見た目が違うとリジェクトされるため、
+    ZIP は素材を作った本人が用意する（README「Vector フォルダの入れ方」を参照）。
+    Adobe / Shutterstock へは同じフォルダの EPS をそのまま送るので、ZIP は PIXTA 専用。
+    """
+    folder = Path(input_folder)
+    zips = get_vector_zip_files(folder)
+    missing = [sub.name for sub in get_vector_subfolders(folder)
+               if list(sub.glob("*.eps")) and not list(sub.glob("*.zip"))]
     if progress_callback:
-        progress_callback(f"\n[Vector/Pixta] {len(vector_results)}件のZIP作成...")
-
-    for meta in vector_results:
-        eps_path = Path(meta["eps_path"])
-        png_path = Path(meta["png_path"])
-        subfolder = Path(meta["subfolder"])
-
-        if not eps_path.exists() or not png_path.exists():
-            continue
-
-        try:
-            zip_path = create_vector_zip(subfolder, eps_path, png_path)
-            if progress_callback:
-                progress_callback(f"  ZIP作成完了: {zip_path.name}")
-            zips.append(zip_path)
-        except Exception as e:
-            if progress_callback:
-                progress_callback(f"  [NG] エラー ({subfolder.name}): {e}")
-
+        if zips:
+            progress_callback(f"[Vector/Pixta] ZIP {len(zips)}件をそのままアップロードします。")
+        if missing:
+            progress_callback("  [!] PIXTA用ZIPが無いベクター素材があります（PIXTAへは上がりません）: "
+                              + " / ".join(missing))
+            progress_callback("      素材ごとのフォルダに <素材名>.zip を作ってください"
+                              "（中身: EPS + JPEG、透過素材ならPNGも）。")
     return zips
 
 

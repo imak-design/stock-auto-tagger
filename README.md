@@ -17,7 +17,7 @@ Gemini AI を使ってストック素材（画像・動画・ベクターEPS）�
 5. **全自動パイプライン**: タグ生成 → 3サイトアップロード → ファイル移動まで一気通貫
 6. **ブラウザ自動アップロード**: Playwright で各サイトにファイルをアップロード → CSV 適用 → 審査提出まで全自動
 7. **バリエーションリネーム**: 色違い素材のキーワードと色名を1回のAPIコールで判定して自動リネーム
-8. **ベクター(EPS)対応**: EPS + PNG → XMP 埋め込み → ZIP 化 → アップロード
+8. **ベクター(EPS)対応**: Adobe / Shutterstock へは EPS をそのまま、Pixta へはご自身で作った ZIP をそのままアップロード
 
 ## 対応サイト
 
@@ -25,7 +25,7 @@ Gemini AI を使ってストック素材（画像・動画・ベクターEPS）�
 |--------|:----:|:----:|:--------:|
 | Adobe Stock | JPG/PNG | MP4/MOV | EPS |
 | Shutterstock | JPG | MP4/MOV | EPS |
-| Pixta | JPG/PNG | MP4/MOV | ZIP(EPS+PNG) |
+| Pixta | JPG/PNG | MP4/MOV | ZIP（利用者が作る） |
 
 ---
 
@@ -126,12 +126,47 @@ cp config.example.json config.json
 |:---:|------|------|
 | `AI/` | AI生成画像 | AI で生成した画像は必ずここに入れてください（Adobe で AI生成の申告が自動設定されます。Shutterstock・Pixta は AI 素材受付停止のため自動的に除外されます） |
 | `Photo/` | 写真素材 | Adobe で写真カテゴリ、Pixta で写真ページにアップしたい人 |
-| `Vector/` | ベクター素材（EPS + PNG） | EPS ファイルをアップロードする人 |
+| `Vector/` | ベクター素材（EPS ＋ 見本画像 ＋ PIXTA用ZIP） | EPS ファイルをアップロードする人 |
 
 - 通常のイラスト・動画素材は `input_folder` 直下にそのまま入れてください
 - 必要なフォルダだけ作れば OK です（全部作る必要はありません）
 - 工程0（リネーム）を使う場合は、`variation/` の下に `01/`〜`10/`（動画は `variation/movie/01/`〜）のサブフォルダを使う分だけ手動で作成してください
-- Vector フォルダ内は素材ごとにサブフォルダを作り、EPS と PNG をセットで入れてください（例: `Vector/260405_crown_vector/` に `.eps` と `.png`）
+- Vector フォルダ内は素材ごとにサブフォルダを作ります。**PIXTA へ出すには ZIP をご自身で作る必要があります** → 下の「Vector フォルダの入れ方」
+
+#### Vector フォルダの入れ方（PIXTA へ出す人は必読）
+
+素材ごとにサブフォルダを作り、**そのフォルダ名と同じ名前**でファイルを入れます。
+
+```
+input/Vector/260405_crown_vector/
+    ├── 260405_crown_vector.eps   ← Adobe / Shutterstock はこれをそのまま送ります
+    ├── 260405_crown_vector.jpg   ← PIXTA の ZIP に入れる見本画像
+    ├── 260405_crown_vector.png   ← 背景が透過の素材のときだけ
+    └── 260405_crown_vector.zip   ← ★PIXTA へ送る ZIP。あなたが作ります★
+```
+
+**EPS は Illustrator 10 形式で保存してください。** 3サイトの受付形式の最大公約数です
+（Shutterstock は EPS 8 か 10 のみ、PIXTA は Illustrator 8.0〜CS2 互換のみ）。
+EPS 8 はメタデータを保持しないので選ばないでください。
+
+**PIXTA へ出すには ZIP が必要です。** PIXTA だけはベクターを ZIP で受け取ります。
+EPS だけを送っても JPEG・PNG が販売されません。**ZIP は素材ごとにご自身で作ってください。**
+中身は背景が透過かどうかで変わります。
+
+| 素材 | ZIP に入れるもの |
+|---|---|
+| **背景が透過** | EPS + PNG + JPEG |
+| **背景に色や白を敷いている** | EPS + JPEG |
+
+透過でない絵を PNG にしても JPEG と同じ絵になるだけなので入れません。
+**JPEG と PNG は、その EPS を開いて実寸で書き出したもの**にしてください。
+PIXTA は ZIP の中の EPS と見本画像の見た目が違うとリジェクトします。
+
+ZIP の作り方（Windows）: 4つのファイルのうち EPS・JPEG（と透過なら PNG）を選択 →
+右クリック → 「送る」→「圧縮 (zip 形式) フォルダー」→ フォルダ名と同じ名前に変更。
+
+- ZIP が無い素材は Adobe と Shutterstock にだけ上がり、PIXTA はスキップされます（ログに警告が出ます）
+- Adobe は ZIP を受け付けません。Adobe / Shutterstock へは EPS がそのまま送られます
 
 ### 5. Gemini API キーの設定
 
@@ -302,7 +337,7 @@ stock-auto-tagger/
 │   ├── image1.jpg / image2.png / video1.mp4
 │   ├── AI/                   ← AI生成素材（同梱済み）
 │   ├── Photo/                ← 写真素材（同梱済み）
-│   ├── Vector/               ← ベクター素材（EPS + PNG、同梱済み）
+│   ├── Vector/               ← ベクター素材（EPS + 見本画像 + PIXTA用ZIP、同梱済み）
 │   └── csv_output/           ← CSV 自動出力先（自動作成）
 │
 ├── variation/                ← バリエーション素材（工程0用、任意）
@@ -334,7 +369,7 @@ stock-auto-tagger/
 | PNG | 対象 | 対象外 | 対象 |
 | JPG | 対象 | 対象 | 対象 |
 | 動画 | 対象 | 対象 | 対象 |
-| EPS | 対象 | 対象 | ZIP(EPS+PNG) |
+| EPS | 対象 | 対象 | ZIP（利用者が作る。透過=EPS+PNG+JPEG / 不透過=EPS+JPEG） |
 
 > Shutterstock は PNG 非対応のため、JPG と動画のみアップロードされます。
 

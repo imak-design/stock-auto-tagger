@@ -104,7 +104,7 @@ from stock_tagger import (
     process_folder, move_processed_files, rename_variation_folders,
     get_upload_targets,
     process_vector_files, move_vector_subfolders,
-    get_vector_eps_files, prepare_vector_zips_with_xmp,
+    get_vector_eps_files, collect_vector_zips,
     estimate_api_requests, validate_upload_files,
     write_adobe_stock_csv, write_shutterstock_csv,
 )
@@ -1245,15 +1245,13 @@ class StockTaggerApp:
             photo_files_all = get_photo_files(folder_path)
             photo_images = [f for f in photo_files_all if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
 
-            # ベクターZIP
-            vector_results = getattr(self, 'last_vector_results', [])
+            # ベクターZIPは利用者が用意したものをそのまま上げる
             vector_zips = []
-            if vector_results:
-                try:
-                    vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
-                except Exception as e:
-                    log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
-                    failed_services.append("Pixta Vector")
+            try:
+                vector_zips = collect_vector_zips(folder, log)
+            except Exception as e:
+                log(f"[NG] Pixta Vector ZIP収集エラー: {e}")
+                failed_services.append("Pixta Vector")
 
             # ---- 工程A: イラストページ（通常画像 + ベクターZIP）----
             illust_files = pixta_images + vector_zips
@@ -1733,20 +1731,11 @@ class StockTaggerApp:
         image_targets = [f for f in all_targets if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
         video_targets = [f for f in all_targets if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
 
-        vector_results = getattr(self, 'last_vector_results', [])
-        if not vector_results:
-            # メモリになければJSONから読み込み
-            import json as _json
-            vector_meta_path = folder_path / "csv_output" / "vector_metadata.json"
-            if vector_meta_path.exists():
-                try:
-                    with open(vector_meta_path, "r", encoding="utf-8") as _f:
-                        vector_results = _json.load(_f)
-                    self.last_vector_results = vector_results
-                except Exception:
-                    pass
+        # ベクターは置いてあるZIPの数がそのまま対象数
+        from stock_tagger import get_vector_zip_files as _get_vector_zip_files
+        vector_zip_files = _get_vector_zip_files(folder_path)
 
-        if not all_targets and not photo_files and not vector_results:
+        if not all_targets and not photo_files and not vector_zip_files:
             messagebox.showinfo("確認", "Pixtaアップロード対象のファイルが見つかりません。")
             return
 
@@ -1760,8 +1749,8 @@ class StockTaggerApp:
             extra_notes.append(f"写真: {len(photo_files)}件")
         if video_targets:
             extra_notes.append(f"動画: {len(video_targets)}件")
-        if vector_results:
-            extra_notes.append(f"Vector: {len(vector_results)}件")
+        if vector_zip_files:
+            extra_notes.append(f"Vector: {len(vector_zip_files)}件のZIP")
         extra_note = f"\n（うち{' / '.join(extra_notes)}）" if extra_notes else ""
         if not messagebox.askyesno(
             "Pixtaアップロード確認",
@@ -1773,7 +1762,7 @@ class StockTaggerApp:
         if self.test_mode:
             self._log("⚠ テストモードで実行中（審査申請はスキップされます）", "error")
         self._log(
-            f"\n🌸 Pixta アップロード開始（画像:{len(image_targets)}件 / 動画:{len(video_targets)}件 / Vector:{len(vector_results)}件）...",
+            f"\n🌸 Pixta アップロード開始（画像:{len(image_targets)}件 / 動画:{len(video_targets)}件 / Vector:{len(vector_zip_files)}件）...",
             "info"
         )
 
@@ -1785,13 +1774,12 @@ class StockTaggerApp:
                 # ファイル収集（AI素材はPIXTA受付停止のため除外）
                 photo_img = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
 
-                # ベクターZIP
+                # ベクターZIPは利用者が用意したものをそのまま上げる
                 vector_zips = []
-                if vector_results:
-                    try:
-                        vector_zips = prepare_vector_zips_with_xmp(folder, vector_results, log)
-                    except Exception as e:
-                        log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
+                try:
+                    vector_zips = collect_vector_zips(folder, log)
+                except Exception as e:
+                    log(f"[NG] Pixta Vector ZIP収集エラー: {e}")
 
                 # ---- 工程A: イラストページ（通常画像 + ベクターZIP）----
                 illust_files = image_targets + vector_zips

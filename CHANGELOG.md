@@ -8,6 +8,40 @@ Stock Auto Tagger の主な変更点をまとめています。**新しい変更
 
 ---
 
+## 2026-09-10
+
+### 🔧 ベクター: Pixta 用 ZIP は利用者が用意する方式に変更（**入れ方が変わります**）
+
+Pixta のベクター入稿は「対応する JPEG と EPS をまとめた ZIP。PNG は任意の追加」で、
+**背景が透過かどうかで中身が変わります。** これまでツールが EPS と PNG を機械的に ZIP 化していましたが、
+不透過の素材では PNG が JPEG と同じ絵になり、Pixta の要件から外れていました。
+
+**これからは、素材ごとのフォルダに ZIP をご自身で置いてください。** ツールはそれをそのまま送ります。
+
+```
+input/Vector/260402_icon/
+    ├── 260402_icon.eps   ← Adobe / Shutterstock はこれをそのまま送ります
+    ├── 260402_icon.jpg   ← Pixta の ZIP に入れる見本画像
+    ├── 260402_icon.png   ← 背景が透過の素材のときだけ
+    └── 260402_icon.zip   ← ★Pixta へ送る ZIP。あなたが作ります★
+```
+
+| 素材 | ZIP に入れるもの |
+|---|---|
+| 背景が透過 | EPS + PNG + JPEG |
+| 背景に色や白を敷いている | EPS + JPEG |
+
+- JPEG・PNG は**その EPS を開いて実寸で書き出したもの**にしてください。Pixta は ZIP の中の EPS と見本画像の見た目が違うとリジェクトします
+- ZIP が無い素材は Adobe と Shutterstock にだけ上がり、Pixta はスキップされます（ログに警告が出ます）
+- Adobe は ZIP を受け付けません。ZIP は Pixta 専用です
+- EPS は Illustrator 10 形式で保存してください（Shutterstock は EPS 8 か 10 のみ、Pixta は Illustrator 8.0〜CS2 互換のみ。EPS 8 はメタデータを保持しません）
+
+### 📖 ドキュメント
+
+- README・マニュアルの「Vector フォルダの入れ方」に、ZIP の中身と作り方を追記しました
+
+---
+
 ## 2026-08-08
 
 - 🛠 **写真は全件提出できているのに「未提出が残っています」と警告される問題を修正（Shutterstock）**
