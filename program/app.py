@@ -104,7 +104,7 @@ from stock_tagger import (
     process_folder, move_processed_files, rename_variation_folders,
     get_upload_targets,
     process_vector_files, move_vector_subfolders,
-    get_vector_eps_files, collect_vector_zips,
+    get_vector_eps_files, build_vector_zips, load_vector_results,
     estimate_api_requests, validate_upload_files,
     write_adobe_stock_csv, write_shutterstock_csv,
 )
@@ -1260,12 +1260,14 @@ class StockTaggerApp:
             photo_files_all = get_photo_files(folder_path)
             photo_images = [f for f in photo_files_all if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
 
-            # ベクターZIPは利用者が用意したものをそのまま上げる
+            # ベクターZIPはツールが作る（工程1で EPS にタイトル・タグを埋めた後に固める）。
+            # 工程2だけを後から実行したときは csv_output/vector_metadata.json から結果を復元する。
+            vector_results = getattr(self, 'last_vector_results', []) or load_vector_results(folder)
             vector_zips = []
             try:
-                vector_zips = collect_vector_zips(folder, log)
+                vector_zips = build_vector_zips(folder, vector_results, log)
             except Exception as e:
-                log(f"[NG] Pixta Vector ZIP収集エラー: {e}")
+                log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
                 failed_services.append("Pixta Vector")
 
             # ---- 工程A: イラストページ（通常画像 + ベクターZIP）----
@@ -1755,12 +1757,15 @@ class StockTaggerApp:
         image_targets = [f for f in all_targets if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
         video_targets = [f for f in all_targets if f.suffix.lower() in UPLOAD_VIDEO_EXTENSIONS]
 
-        # ベクターは置いてあるZIPの数がそのまま対象数
-        from stock_tagger import get_vector_zip_files as _get_vector_zip_files
-        vector_zip_files = _get_vector_zip_files(folder_path)
+        # ベクターは工程1の解析結果（メモリ、無ければ csv_output/vector_metadata.json）から
+        # ツールがZIPを作って上げる。置いてあるZIPは数えない（作り直すので）。
+        vector_results = getattr(self, 'last_vector_results', []) or load_vector_results(folder)
+        vector_zip_files = [_Path(m["eps_path"]).with_suffix(".zip") for m in vector_results
+                            if _Path(m.get("eps_path", "")).is_file()]
 
         if not all_targets and not photo_files and not vector_zip_files:
-            messagebox.showinfo("確認", "Pixtaアップロード対象のファイルが見つかりません。")
+            messagebox.showinfo("確認", "Pixtaアップロード対象のファイルが見つかりません。\n"
+                                "（ベクターは工程1を通した素材だけが対象です）")
             return
 
         # --- 開始前確認ダイアログ ---
@@ -1798,12 +1803,12 @@ class StockTaggerApp:
                 # ファイル収集（AI素材はPIXTA受付停止のため除外）
                 photo_img = [f for f in photo_files if f.suffix.lower() not in UPLOAD_VIDEO_EXTENSIONS]
 
-                # ベクターZIPは利用者が用意したものをそのまま上げる
+                # ベクターZIPはツールが作る（EPSにタイトル・タグが入っているのを確かめてから固める）
                 vector_zips = []
                 try:
-                    vector_zips = collect_vector_zips(folder, log)
+                    vector_zips = build_vector_zips(folder, vector_results, log)
                 except Exception as e:
-                    log(f"[NG] Pixta Vector ZIP収集エラー: {e}")
+                    log(f"[NG] Pixta Vector ZIP作成エラー: {e}")
 
                 # ---- 工程A: イラストページ（通常画像 + ベクターZIP）----
                 illust_files = image_targets + vector_zips

@@ -171,6 +171,24 @@ def _page_error_texts(page) -> list:
     return texts[:10]
 
 
+def _upload_error_texts(page) -> list:
+    """アップロード画面の「アップロードエラー」帯の文言（ファイル名: 理由）。無ければ空。
+
+    Pixta はZIPの中身などで受け付けないファイルを、送った直後にこの帯へ出してアップロードを
+    止める（例「複数のJPEGまたはPNGが含まれています」）。帯は Knockout の
+    `visible: hasErrors() || hasWarnings()` で、エラーが無いときは li 自体が無い。
+    """
+    try:
+        texts = []
+        for t in page.locator("section[data-bind*='hasErrors'] li").all_inner_texts():
+            t = " ".join(t.split())
+            if t and t not in texts:
+                texts.append(t)
+        return texts
+    except Exception:
+        return []
+
+
 def _raise_no_progress(page, remaining: int):
     """登録を押しても件数が減らないときに、原因の手掛かりを添えて中断する"""
     reasons = _page_error_texts(page)
@@ -288,20 +306,37 @@ def run_upload_and_submit(files: list, progress_callback=None, skip_submit: bool
                 log("[!] disabled-btn never appeared - upload may have started differently, continuing...")
 
             # アップロード完了を待機（disabled-btn が外れるまで最大5分）
+            # Pixta が受け付けないファイルは「アップロードエラー」帯に出て、ボタンは戻らない。
+            # 全件が帯に出たら5分待たずに、その文言を添えて止める。
             log("Waiting for upload to complete...")
+            rejected = []
             for i in range(300):
                 time.sleep(1)
                 try:
+                    rejected = _upload_error_texts(page) or rejected
+                    if rejected and len(rejected) >= len(files):
+                        raise RuntimeError(
+                            "Pixta がアップロードを受け付けませんでした（ファイルは送られていません）: "
+                            + " / ".join(rejected)
+                        )
                     cls = submit_btn.get_attribute("class") or ""
                     if "disabled-btn" not in cls:
                         log(f"Upload complete ({i+1}s elapsed)")
                         break
                     if i % 15 == 0 and i > 0:
                         log(f"  ...still uploading ({i}s)")
+                except RuntimeError:
+                    raise
                 except Exception:
                     pass
             else:
-                raise TimeoutError("Upload timed out after 5 minutes")
+                raise TimeoutError(
+                    "Upload timed out after 5 minutes"
+                    + (" / Pixta のアップロードエラー: " + " / ".join(rejected) if rejected else "")
+                )
+            if rejected:
+                log("[!] Pixta が一部のファイルを受け付けませんでした（このまま残りを登録します）: "
+                    + " / ".join(rejected))
 
             # IPTC情報を反映チェックボックスをON
             log("Enabling IPTC metadata checkbox...")

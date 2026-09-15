@@ -1682,26 +1682,140 @@ def process_vector_files(input_folder: str, api_key: str, progress_callback=None
     return {"success": len(results), "errors": errors, "results": results}
 
 
-def collect_vector_zips(input_folder: str, progress_callback=None) -> list:
-    """Vector/<素材名>/ に置かれた PIXTA 用 ZIP をそのまま集める。ツールでは作らない。
+def _eps_pixta_xmp_status(eps_path: Path) -> tuple:
+    """EPSにPIXTA用の dc:title / dc:subject が入っているかを返す → (title有無, タグ数)"""
+    try:
+        text = eps_path.read_bytes().decode("utf-8", errors="replace")
+    except Exception:
+        return (False, 0)
+    has_title = "<dc:title>" in text
+    start = text.find("<dc:subject>")
+    if start < 0:
+        return (has_title, 0)
+    end = text.find("</dc:subject>", start)
+    return (has_title, text[start:end].count("<rdf:li>"))
 
-    PIXTA のベクター入稿は「対応する JPEG と EPS をまとめた ZIP。PNG は任意の追加」。
-    透過素材かどうかで中身が変わり、EPS とラスタの見た目が違うとリジェクトされるため、
-    ZIP は素材を作った本人が用意する（README「Vector フォルダの入れ方」を参照）。
-    Adobe / Shutterstock へは同じフォルダの EPS をそのまま送るので、ZIP は PIXTA 専用。
+
+def png_has_transparency(png_path: Path) -> bool:
+    """実際に透明な画素があるか。アルファチャンネルの有無では判定しない。"""
+    from PIL import Image
+    with Image.open(str(png_path)) as im:
+        if im.mode not in ("RGBA", "LA", "PA", "P") and "transparency" not in im.info:
+            return False
+        return im.convert("RGBA").getchannel("A").getextrema()[0] < 255
+
+
+def vector_zip_members(subfolder: Path, eps_path: Path, png_path: Path = None) -> list:
+    """PIXTA用ZIPに入れるファイル。EPS＋見本画像1枚。
+
+    PIXTA公式「ベクター・PNG素材ガイドライン」（pixta.jp/guide/?p=7136）の表どおり:
+    背景が透過の素材は EPS+PNG（販売用JPGはPIXTAがPNGから自動生成）、不透過は EPS+JPG。
+    **見本画像を2枚入れると「複数のJPEGまたはPNGが含まれています」でアップロード自体が拒否される。**
+    PNGが不透過で同じ名前のJPGが無いときは EPS+PNG にする（受け付けはされる。JPGを置けば
+    「ベクター＋JPG」として登録される）。
     """
+    stem = eps_path.stem
+    png = png_path if (png_path and Path(png_path).is_file()) else (subfolder / f"{stem}.png")
+    jpg = next((p for p in (subfolder / f"{stem}.jpg", subfolder / f"{stem}.jpeg") if p.is_file()), None)
+    if png.is_file():
+        try:
+            transparent = png_has_transparency(png)
+        except Exception:
+            transparent = True
+        if transparent or jpg is None:
+            return [eps_path, png]
+        return [eps_path, jpg]
+    if jpg is not None:
+        return [eps_path, jpg]
+    raise ValueError(f"{stem}: ZIPに入れる見本画像（PNG か JPG）がありません。")
+
+
+def create_vector_zip(subfolder: Path, eps_path: Path, png_path: Path = None) -> Path:
+    """PIXTA用ZIPを作る（同じ名前のZIPがあれば作り直す）。中身は vector_zip_members。"""
+    import zipfile
+    members = vector_zip_members(subfolder, eps_path, png_path)
+    zip_path = subfolder / f"{eps_path.stem}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for member in members:
+            zf.write(str(member), member.name)
+    return zip_path
+
+
+def load_vector_results(input_folder: str) -> list:
+    """工程1が csv_output/vector_metadata.json に残したベクターの解析結果を読む。
+
+    工程2（アップロード）だけを後から実行したとき、メモリの結果は無いのでここから復元する。
+    無ければ空。
+    """
+    import json as _json
+    path = Path(input_folder) / "csv_output" / "vector_metadata.json"
+    if not path.is_file():
+        return []
+    try:
+        loaded = _json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return [r for r in loaded if isinstance(r, dict) and r.get("eps_path")] if isinstance(loaded, list) else []
+
+
+def build_vector_zips(input_folder: str, vector_results: list, progress_callback=None) -> list:
+    """工程1で解析したベクター素材について、EPSのタイトル・タグを確かめてから PIXTA 用 ZIP を作る。
+
+    PIXTA のイラストは**ファイルに埋まったXMPだけ**がタイトル・タグの経路。だから ZIP は
+    利用者が事前に作るのではなく、**工程1で EPS に埋め込んだ後に、ツールが作る**
+    （2026-09-10〜09-15 の「利用者が置いた ZIP をそのまま上げる」方式は、ZIP の中の EPS に
+    タイトル・タグが入らず登録が通らないうえ、案内していた中身も誤っていた）。
+    置いてある ZIP は作り直す。Adobe / Shutterstock へは同じフォルダの EPS をそのまま送る。
+    """
+    zips = []
     folder = Path(input_folder)
-    zips = get_vector_zip_files(folder)
-    missing = [sub.name for sub in get_vector_subfolders(folder)
-               if list(sub.glob("*.eps")) and not list(sub.glob("*.zip"))]
+    known = {Path(m.get("eps_path", "")).resolve() for m in vector_results}
+    unknown = [sub.name for sub in get_vector_subfolders(folder)
+               if list(sub.glob("*.eps")) and not any(Path(e).resolve() in known for e in sub.glob("*.eps"))]
+    if progress_callback and unknown:
+        progress_callback("  [!] 工程1（解析）を通っていないベクター素材があります。PIXTAへは上がりません"
+                          "（タイトル・タグが無いため）。先に工程1を実行してください: " + " / ".join(unknown))
+    if not vector_results:
+        return zips
     if progress_callback:
-        if zips:
-            progress_callback(f"[Vector/Pixta] ZIP {len(zips)}件をそのままアップロードします。")
-        if missing:
-            progress_callback("  [!] PIXTA用ZIPが無いベクター素材があります（PIXTAへは上がりません）: "
-                              + " / ".join(missing))
-            progress_callback("      素材ごとのフォルダに <素材名>.zip を作ってください"
-                              "（中身: EPS + JPEG、透過素材ならPNGも）。")
+        progress_callback(f"\n[Vector/Pixta] {len(vector_results)}件のZIP作成...")
+    for meta in vector_results:
+        eps_path = Path(meta["eps_path"])
+        subfolder = Path(meta.get("subfolder") or eps_path.parent)
+        png_path = Path(meta["png_path"]) if meta.get("png_path") else None
+        if not eps_path.exists():
+            continue
+        title = (meta.get("pixta_title_ja") or "")[:50]
+        keywords = [k.strip() for k in (meta.get("pixta_keywords_ja") or "").split(",") if k.strip()][:50]
+        has_title, tag_count = _eps_pixta_xmp_status(eps_path)
+        if (not has_title or tag_count == 0) and title and keywords:
+            # 工程1の後で Illustrator が保存し直すと XMP が消える。ZIPを固める直前に埋め直す。
+            try:
+                embed_eps_xmp(eps_path, title, keywords)
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(f"  [NG] XMP埋め込み失敗 ({eps_path.name}): {e}")
+            has_title, tag_count = _eps_pixta_xmp_status(eps_path)
+        if progress_callback:
+            progress_callback(f"  XMP確認: {eps_path.name} タイトル={'あり' if has_title else 'なし'} / タグ={tag_count}個")
+            if tag_count == 0:
+                progress_callback(
+                    f"  [!] {eps_path.name} にタグが入っていません。このままPixtaに上げると"
+                    "タイトル・タグ無しの素材になり、審査申請の登録が通りません"
+                    "（EPS 8 で保存されているとXMPが無く埋め込めません。Illustrator 10 EPS で保存し直してください）"
+                )
+        try:
+            zip_path = create_vector_zip(subfolder, eps_path, png_path)
+        except Exception as e:
+            if progress_callback:
+                progress_callback(f"  [NG] ZIP作成エラー ({subfolder.name}): {e}")
+            continue
+        import zipfile as _zipfile
+        with _zipfile.ZipFile(str(zip_path)) as zf:
+            names = sorted(zf.namelist())
+        if progress_callback:
+            progress_callback(f"  ZIP作成完了: {zip_path.name}（{' + '.join(names)}）")
+        zips.append(zip_path)
     return zips
 
 

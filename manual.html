@@ -368,7 +368,7 @@ li { margin-bottom: 6px; }
     <tr><th>サイト</th><th class="center">画像</th><th class="center">動画</th><th class="center">ベクター</th></tr>
     <tr><td>Adobe Stock</td><td class="center">JPG / PNG</td><td class="center">MP4 / MOV</td><td class="center">EPS</td></tr>
     <tr><td>Shutterstock</td><td class="center">JPG</td><td class="center">MP4 / MOV</td><td class="center">EPS</td></tr>
-    <tr><td>Pixta</td><td class="center">JPG / PNG</td><td class="center">MP4 / MOV</td><td class="center">ZIP（利用者が作る）</td></tr>
+    <tr><td>Pixta</td><td class="center">JPG / PNG</td><td class="center">MP4 / MOV</td><td class="center">ZIP（ツールが作る）</td></tr>
   </table>
   <p class="sub">※ Shutterstock は PNG 非対応のため、JPG と動画のみアップロードされます。<br>
   ※ Shutterstock・Pixta は AI 生成素材の受付を停止中のため、AI 素材はこれらのサイトから自動除外されます。</p>
@@ -529,31 +529,32 @@ variation/                    ← おまけ機能（工程0用）
     </ul>
   </div>
 
-  <h3>input/Vector/ — ベクター素材（Pixta へ出す人は ZIP が必要）</h3>
+  <h3>input/Vector/ — ベクター素材（EPS と PNG を置くだけ）</h3>
   <div class="card-sm">
-    <p><strong>素材ごとにサブフォルダを作り、フォルダ名と同じ名前でファイルを入れてください。</strong></p>
+    <p><strong>素材ごとにサブフォルダを作り、フォルダ名と同じ名前で EPS と PNG を入れてください。</strong></p>
     <pre><code>Vector/
 └── 260402_icon/
     ├── 260402_icon.eps   ← ベクター本体（Illustrator 10 形式で保存）
-    ├── 260402_icon.jpg   ← Pixta の ZIP に入れる見本画像
-    ├── 260402_icon.png   ← 背景が透過の素材のときだけ
-    └── 260402_icon.zip   ← ★Pixta へ送る ZIP。あなたが作ります★</code></pre>
+    └── 260402_icon.png   ← 解析用の見本画像。Pixta の ZIP にも入ります
+        （背景に色や白を敷いた素材は、同じ名前の 260402_icon.jpg も置くと
+          Pixta へ「ベクター＋JPG」として登録されます。無くても上がります）</code></pre>
     <ul>
       <li>Adobe・Shutterstock: <strong>EPS をそのまま</strong>アップロード（JPEG・PNG は各サイトが自動で作ります）</li>
-      <li>Pixta: <strong>あなたが作った ZIP</strong> をそのままアップロード（ZIP が無い素材は Pixta だけスキップされ、ログに警告が出ます）</li>
+      <li>Pixta: <strong>ツールが作った ZIP</strong>（EPS ＋ 見本画像 1 枚）をアップロード。ご自身で ZIP を作る必要はありません</li>
     </ul>
-    <p><strong>ZIP の中身は背景が透過かどうかで変わります。</strong></p>
+    <p><strong>ZIP の中身は EPS ＋ 見本画像 1 枚。見本画像は背景が透過かどうかで変わります</strong>（Pixta 公式「ベクター・PNG素材ガイドライン」 <a href="https://pixta.jp/guide/?p=7136">pixta.jp/guide/?p=7136</a> の表のとおり）。</p>
     <table>
-      <tr><th>素材</th><th>ZIP に入れるもの</th></tr>
-      <tr><td>背景が透過</td><td>EPS + PNG + JPEG</td></tr>
-      <tr><td>背景に色や白を敷いている</td><td>EPS + JPEG</td></tr>
+      <tr><th>素材</th><th>ZIP の中身</th></tr>
+      <tr><td>背景が透過（PNG に透明な部分がある）</td><td>EPS + PNG（販売用の JPEG は Pixta が PNG から自動で作ります）</td></tr>
+      <tr><td>背景に色や白を敷いている</td><td>EPS + JPG（同じ名前の JPG を置いたとき。無ければ EPS + PNG）</td></tr>
     </table>
     <ul>
-      <li>透過でない絵を PNG にしても JPEG と同じ絵になるだけなので入れません</li>
-      <li>JPEG と PNG は<strong>その EPS を開いて実寸で書き出したもの</strong>にしてください。Pixta は ZIP の中の EPS と見本画像の見た目が違うとリジェクトします</li>
+      <li>ツールは<strong>工程1で EPS にタイトル・タグを埋め込んだ後</strong>、アップロードの直前に ZIP を作ります。<strong>ご自身で ZIP を置いても作り直します</strong>（自分で作った ZIP は中の EPS にタイトル・タグが入らず、Pixta で登録が通りません）</li>
+      <li>見本画像を 2 枚（PNG と JPEG）入れた ZIP は Pixta が「複数のJPEGまたはPNGが含まれています」と拒否します。ツールは必ず 1 枚だけ入れます</li>
+      <li>見本画像は<strong>その EPS を開いて実寸で書き出したもの</strong>にしてください。Pixta は ZIP の中の EPS と見本画像の見た目が違うとリジェクトします</li>
       <li>EPS は <strong>Illustrator 10 形式</strong>で保存してください（Shutterstock は EPS 8 か 10 のみ、Pixta は Illustrator 8.0〜CS2 互換のみ。EPS 8 はメタデータを保持しないので選ばないでください）</li>
+      <li>工程1（解析）を通していない素材は Pixta へ上がりません（ログに出ます）。工程2だけを後から実行するときも、工程1の結果から ZIP を作ります</li>
       <li>Adobe は ZIP を受け付けません。ZIP は Pixta 専用です</li>
-      <li>ZIP の作り方（Windows）: EPS・JPEG（と透過なら PNG）を選択 → 右クリック → 「送る」→「圧縮 (zip 形式) フォルダー」→ フォルダ名と同じ名前に変更</li>
     </ul>
   </div>
 
@@ -868,7 +869,7 @@ variation/                    ← おまけ機能（工程0用）
     <tr><td>JPG</td><td class="center">対象</td><td class="center">対象</td><td class="center">対象</td></tr>
     <tr><td>PNG</td><td class="center">対象</td><td class="center">対象外</td><td class="center">対象</td></tr>
     <tr><td>MP4 / MOV（動画）</td><td class="center">対象</td><td class="center">対象</td><td class="center">対象</td></tr>
-    <tr><td>EPS（ベクター）</td><td class="center">対象</td><td class="center">対象</td><td class="center">ZIP（利用者が作る）</td></tr>
+    <tr><td>EPS（ベクター）</td><td class="center">対象</td><td class="center">対象</td><td class="center">ZIP（ツールが作る）</td></tr>
   </table>
 
   <h3>サブフォルダ × サイト振り分け</h3>
@@ -877,7 +878,7 @@ variation/                    ← おまけ機能（工程0用）
     <tr><td>通常（<code>input/</code> 直下）</td><td class="center">イラスト</td><td class="center">通常</td><td class="center">イラストページ</td></tr>
     <tr><td><code>Photo/</code></td><td class="center">写真カテゴリ</td><td class="center">通常</td><td class="center">写真ページ</td></tr>
     <tr><td><code>AI/</code></td><td class="center">イラスト + AI チェック</td><td class="center">対象外</td><td class="center">対象外</td></tr>
-    <tr><td><code>Vector/</code></td><td class="center">EPS</td><td class="center">EPS</td><td class="center">ZIP（利用者が作る）</td></tr>
+    <tr><td><code>Vector/</code></td><td class="center">EPS</td><td class="center">EPS</td><td class="center">ZIP（ツールが作る）</td></tr>
   </table>
 
   <h3>サイトごとのファイルサイズ上限</h3>
