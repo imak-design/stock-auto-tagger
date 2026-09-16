@@ -247,6 +247,12 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         pass
                 else:
                     log(f"[!] 再待機タイムアウト: {actual_new}/{len(files)}件で続行します")
+            else:
+                # ファイルを送らない回（途中で止まった後に CSV だけ当て直す回）。?upload=1 で自動で開く
+                # アップロードの窓を誰も閉じないので画面に残り、CSV ボタンへのクリックを遮っていた
+                # （2026-09-16 実機: "div.uploader subtree intercepts pointer events" で 30 秒待って失敗）。
+                # 送る回は _upload_files が閉じている。同じように閉じて、一覧を読み直してから先へ進む。
+                _close_upload_overlay(page, log)
 
             # --- Step1: CSV アップロードでメタデータを一括適用 --------
             log("\n>> CSV アップロード開始...")
@@ -353,6 +359,26 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
         "manual_required": _manual_required,
         "manual_reason": manual_reason,
     }
+
+
+def _close_upload_overlay(page, log) -> None:
+    """?upload=1 で自動で開いたアップロードの窓（role=dialog .uploader）を閉じ、窓の無い一覧を開き直す。
+
+    閉じるボタンが無い・押せないときも、?upload=1 を外した一覧の URL へ移れば窓は出ない。
+    """
+    try:
+        close_btn = page.locator('.uploader__close').first
+        if close_btn.is_visible(timeout=3000):
+            close_btn.click()
+            time.sleep(2)
+            log("アップロードの窓を閉じました（今回はファイルを送らない）")
+    except Exception:
+        pass
+    try:
+        page.goto(UPLOADS_URL.split("?")[0], wait_until="domcontentloaded", timeout=60000)
+        time.sleep(5)
+    except Exception as e:
+        log(f"[!] 一覧の開き直しに失敗しました（そのまま続けます）: {e}")
 
 
 def _upload_files(page, files: list, log) -> int:

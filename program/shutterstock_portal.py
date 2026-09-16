@@ -362,12 +362,22 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # ============================================================
             if files:
                 log(f"アップロード開始: {len(files)}件...")
-                # アップロードボタンでドロップゾーンのモーダルを開く
-                upload_btn = page.locator('button[data-testid="uploadButton"]').first
+                # アップロードボタンでドロップゾーンのモーダルを開く。
+                # 2026-09-16 に data-testid が "uploadButton" から "desktop-upload-button" に変わった
+                # （同じ日の 4 分違いの実行で新旧両方を確認＝切り替えの最中）。押すとどちらも同じ dropzone-container が開く。
+                # どちらの名前でも見つかるようにし、無いときはボタンの文言（アップロード）でも探す。
+                upload_btn = page.locator(
+                    'button[data-testid="uploadButton"], button[data-testid="desktop-upload-button"]'
+                ).first
                 try:
                     upload_btn.wait_for(state="visible", timeout=15000)
                 except PWTimeout:
-                    raise RuntimeError("アップロードボタンが見つかりません")
+                    upload_btn = page.get_by_role("button", name=re.compile(r"^(アップロード|Upload)$", re.I)).first
+                    try:
+                        upload_btn.wait_for(state="visible", timeout=5000)
+                    except PWTimeout:
+                        raise RuntimeError("アップロードボタンが見つかりません（data-testid=uploadButton / desktop-upload-button、"
+                                           "文言「アップロード」のどれも表示されていません。ポータルのUIが変わった可能性があります）")
                 upload_btn.click()
 
                 # Shutterstock は native file chooser ではなく dropzone 方式に変更されたため、
