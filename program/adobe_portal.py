@@ -1004,6 +1004,12 @@ _CHALLENGE_FRAME_HINTS = (
 # hCaptcha のチェックボックス枠等）はチャレンジ本体ではないため無視する
 _CHALLENGE_FRAME_IGNORE = ("anchor", "frame=checkbox", "invisible")
 _CHALLENGE_DOM_SELECTORS = (
+    # Adobe 自前の画像選択CAPTCHA（iframe ではなく通常のモーダル）。
+    # 「確認」ボタンは旧サムネイル確認ダイアログと同じ send-moderation-button なので、
+    # これを見落とすと猫を選ばずに「確認」を押して何も提出されない
+    '[data-t="captcha-close-button"]',
+    '[data-t*="captcha" i]',
+    '.modal :text("人間であることを確認")',
     '[data-t="image-challenge-input"]',
     '[class*="challenge"] input',
     '[class*="captcha"]',
@@ -1221,6 +1227,13 @@ def _submit_for_review(page, log):
         if challenge:
             return _fail(f"{challenge}が表示されたため続行できません", manual=True)
         return _fail("サムネイル確認ダイアログが見つかりません。画面の状態を確認してください", manual=True)
+
+    # 同じ send-moderation-button が CAPTCHA の「確認」ボタンのこともある。
+    # CAPTCHA なら押さずに人へ渡す（押すと猫を選ばないまま送って何も提出されない）
+    time.sleep(1)
+    challenge = _detect_human_challenge(page)
+    if challenge:
+        return _fail(f"{challenge}が表示されました。プログラムでは突破できません", manual=True)
 
     # ダイアログ内の全選択チェックボックス（最初のものが「全て選択」）
     try:
