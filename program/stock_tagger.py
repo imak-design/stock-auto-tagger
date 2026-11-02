@@ -614,6 +614,38 @@ def write_adobe_stock_csv(results: list, output_path: Path, append: bool = False
             ])
 
 
+SHUTTERSTOCK_VIDEO_CATEGORIES = frozenset({
+    "Animals/Wildlife", "Art", "Backgrounds/Textures", "Buildings/Landmarks",
+    "Business/Finance", "Education", "Food and Drink", "Healthcare/Medical",
+    "Holidays", "Industrial", "Nature", "Objects", "People", "Religion",
+    "Science", "Signs/Symbols", "Sports/Recreation", "Technology", "Transportation",
+})
+
+
+def _validate_shutterstock_video_categories(filename, categories, is_video=None):
+    if is_video is None:
+        is_video = Path(filename).suffix.lower() in UPLOAD_VIDEO_EXTENSIONS
+    if not is_video:
+        return
+    values = [c.strip() for c in categories.split(",") if c.strip()]
+    invalid = [c for c in values if c not in SHUTTERSTOCK_VIDEO_CATEGORIES]
+    if not 1 <= len(values) <= 2 or invalid:
+        raise ValueError(
+            f"Shutterstock 動画カテゴリーが無効です: {filename}: {categories!r}。"
+            "Abstract など画像専用のカテゴリーは動画に使えません。"
+        )
+
+
+def validate_shutterstock_csv(csv_path: Path):
+    """外部ラインで生成した既存CSVも、ファイルを送る前に検証する。"""
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        if not {"Filename", "Description", "Keywords", "Categories"}.issubset(reader.fieldnames or []):
+            raise ValueError(f"Shutterstock CSV の必須列がありません: {Path(csv_path).name}")
+        for row in reader:
+            _validate_shutterstock_video_categories(row.get("Filename", ""), row.get("Categories", ""))
+
+
 def write_shutterstock_csv(results: list, output_path: Path, append: bool = False):
     ss_cat_map = {
         "動物・野生生物": "Animals/Wildlife", "アート": "Art",
@@ -629,6 +661,20 @@ def write_shutterstock_csv(results: list, output_path: Path, append: bool = Fals
         "レトロ・ビンテージ": "Vintage", "抽象": "Abstract",
         "美容・ファッション": "Beauty/Fashion", "有名人": "Celebrities",
     }
+    # 検証失敗で既存CSVを空にしたり、一部だけ追記したりしない。
+    for r in results:
+        filename = r.get("filename", "")
+        if Path(filename).suffix.lower() == ".png":
+            continue
+        cat1 = r.get("shutterstock_category1", "")
+        cat2 = r.get("shutterstock_category2", "")
+        if not cat1:
+            cat1, cat2 = ADOBE_TO_SHUTTERSTOCK.get(r.get("adobe_category", ""), ("自然", "アート"))
+        values = [ss_cat_map.get(cat1, "miscellaneous"), ss_cat_map.get(cat2, "")]
+        _validate_shutterstock_video_categories(
+            filename, ",".join(c for c in values if c),
+            r.get("file_type") == "video" or Path(filename).suffix.lower() in UPLOAD_VIDEO_EXTENSIONS,
+        )
     mode = "a" if append else "w"
     with open(output_path, mode, newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)

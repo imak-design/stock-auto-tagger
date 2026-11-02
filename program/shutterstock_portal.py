@@ -16,9 +16,10 @@ PHOTO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/photo"
 VIDEO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/video"
 
 
-# CSV を当ててから画面に反映されるまで待つ上限と、その間の再確認間隔。
-# 反映されれば即抜けるので、速い日に待たされることはない。効かない日は何分待っても
-# 入らない（Shutterstock 側が無音で無視している）ので、打ち切って戻り値で上へ伝える。
+# CSV反映の待ち上限。行の拒否は処理結果モーダルを読んで即時エラーにし、
+# 処理結果がエラーでない場合だけキーワード反映を最大120秒確認する。
+# 2026-11-02: 13行中10行が動画非対応のAbstractで拒否されていた。
+# 取り込み失敗を一律に「サイトが無音で無視」と診断しない。
 CSV_REFLECT_TIMEOUT_S = 120
 CSV_REFLECT_POLL_S = 20
 
@@ -192,6 +193,31 @@ def _verify_csv_applied(page, csv_path: Path, log, label: str = "") -> bool:
     return True
 
 
+class CSVImportError(RuntimeError):
+    """Shutterstock がCSVの行を拒否した。待機や提出では解消しない。"""
+
+
+def _check_csv_import_result(page, log):
+    header = page.locator('[data-testid="CSV error modal header"]')
+    if not header.count() or not header.first.is_visible():
+        return
+    dialog = header.first.locator('xpath=ancestor::*[@role="dialog"][1]')
+    details = dialog.inner_text()
+    row_errors = dialog.locator('[data-testid="row error"]').all_inner_texts()
+    error_count = re.search(r'(?:アップロードエラー|Upload errors?)\s*:\s*(\d+)', details, re.I)
+    summary = re.search(r'(\d+)行中(\d+)行', details)
+    # 同じCSV名を再投入すると、全行成功・エラー0でも前回の行明細が残る。
+    # 全行成功を明示した最新の集計を優先し、古い明細で成功を覆さない。
+    all_succeeded = bool(error_count and int(error_count.group(1)) == 0 and summary
+                         and int(summary.group(1)) == int(summary.group(2)))
+    if ((error_count and int(error_count.group(1)) > 0)
+            or (row_errors and not all_succeeded)
+            or (summary and int(summary.group(1)) != int(summary.group(2)))):
+        raise CSVImportError("Shutterstock CSV取り込みエラー:\n" + details)
+    log("[OK] CSV処理結果: " + " / ".join(details.splitlines()[:7]))
+    dialog.locator('[data-testid="lower-close-button"]').click()
+
+
 def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
                         timeout_s: int = CSV_REFLECT_TIMEOUT_S) -> bool:
     """CSV が画面に反映されるまで、ページを更新しながら待つ。
@@ -201,10 +227,9 @@ def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
     ない）。従来の「固定 4+5 秒 → reload → 1 回確認」では届かず、毎回 keyword未検出 →
     カテゴリー空のまま提出 →「未送信」に滞留していた。
 
-    ただし待ち上限は短くてよい（2026-09-03 に 10 分 → 2 分）。効く日は 1 回目の確認で
-    通り、効かない日は何分待っても永久に入らない（SS 側が CSV を無音で無視している）。
-    長く待っても判定は変わらないので、打ち切って False を返し先へ進む。**呼び出し元は
-    この False を握り潰さないこと**（ファイル移動を止める判断材料になる）。
+    行ごとの取り込みエラーはモーダルの具体的な理由を例外で返す。
+    エラーが出ていない場合も上限でFalseを返す。呼び出し元はFalseを握り潰さず、
+    ファイル移動を止める判断材料にする。
 
     反映を検知したら即座に True を返すので、速い日は待たされない。
     """
@@ -213,6 +238,7 @@ def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
     attempt = 0
     while True:
         attempt += 1
+        _check_csv_import_result(page, log)
         _close_popups(page)
         _select_all(page, log)
         time.sleep(2)
@@ -227,7 +253,8 @@ def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
         remain = int(deadline - time.time())
         log(f"[..] {prefix}CSV 反映待ち（{attempt} 回目 / 残り約 {remain} 秒）"
             f"{CSV_REFLECT_POLL_S} 秒後に更新して再確認します")
-        time.sleep(CSV_REFLECT_POLL_S)
+        page.wait_for_timeout(CSV_REFLECT_POLL_S * 1000)
+        _check_csv_import_result(page, log)
         try:
             page.reload(wait_until="domcontentloaded", timeout=30000)
         except Exception as e:
@@ -254,8 +281,8 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
     CSV が一度も当たらず、動画が説明もキーワードも空のまま「未送信」に滞留していた
     （2026-08-01 判明: 魔法陣動画 6 本が 1 週間分積み上がっていた）。
 
-    失敗しても例外にしない（ここで落とすとブラウザの後始末まで巻き添えになる）。
-    代わりに戻り値で必ず上へ伝える。
+    画面操作の失敗は戻り値で上へ伝える。CSVの行拒否はCSVImportErrorを再送出し、
+    具体的な理由を呼び出し元に表示して提出を止める。
     """
     try:
         csv_btn = page.locator('button[data-testid="csv-upload"]')
@@ -276,12 +303,14 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
             dialog.get_by_role("button", name=re.compile("アップロード", re.I)).click()
         fc_info.value.set_files(str(csv_path))
         log(f"{label}: CSV セット完了: {csv_path.name}")
-        time.sleep(4)
+        page.wait_for_timeout(4000)
+        _check_csv_import_result(page, log)
 
         for _ in range(10):
+            _check_csv_import_result(page, log)
             if not dialog.is_visible():
                 break
-            time.sleep(1)
+            page.wait_for_timeout(1000)
 
         page.reload(wait_until="domcontentloaded", timeout=30000)
         time.sleep(5)
@@ -291,6 +320,8 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
         # （reload は選択を解除し、送信ボタンを消すため）。
         reflected = _wait_csv_reflected(page, csv_path, log, label)
         return True, reflected
+    except CSVImportError:
+        raise
     except Exception as e:
         log(f"[!] {label}: CSV適用に失敗しました: {e}")
         return False, False
@@ -312,6 +343,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
         )
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}")
+
+    from stock_tagger import validate_shutterstock_csv
+    validate_shutterstock_csv(csv_path)
 
     submitted = 0
     errors = []
@@ -455,13 +489,15 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 dialog.get_by_role("button", name=re.compile("アップロード", re.I)).click()
             fc_info.value.set_files(str(csv_path))
             log(f"CSV セット完了: {csv_path.name}")
-            time.sleep(4)
+            page.wait_for_timeout(4000)
+            _check_csv_import_result(page, log)
 
             # ダイアログが閉じるのを待つ（最大10秒）
             for _ in range(10):
+                _check_csv_import_result(page, log)
                 if not dialog.is_visible():
                     break
-                time.sleep(1)
+                page.wait_for_timeout(1000)
 
             # ページリロード → ポップアップ閉じ
             page.reload(wait_until="domcontentloaded", timeout=30000)

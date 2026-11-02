@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "documents": {
+    "README.md": {
+      "role": "procedure",
+      "topic": "user-guide",
+      "dependsOn": [
+        "program/stock_tagger.py",
+        "program/shutterstock_portal.py",
+        "program/app.py",
+        "manual.html"
+      ],
+      "contentSha256": "f90e8cf64f9c104352da4a9e7cd2d119985413c78e73aab57399a8ed4ba3bc72",
+      "reviewedDependencies": {
+        "program/stock_tagger.py": "2f4f9b11b3b503df6c5ced2e02162680ad901c4fd85101d30352e24d2d4b6d6e",
+        "program/shutterstock_portal.py": "45e539c1473b1d924e6e421ac1498ae881ba2dd93b8b5be0282cf68d30a62a7a",
+        "program/app.py": "e2fbc8751c222c0908196e5869fe21024e6e23e75c9357123e99f4f809f2f345",
+        "manual.html": "1752e9821124f009d10e1481e6f1481a8b70cb20f7a70907449ce231be2c862b"
+      },
+      "reviewedAt": "2026-11-02T08:12:36.444328+00:00",
+      "reviewNote": "Shutterstockの動画カテゴリーは画像と異なること、無効値は送信前停止、行拒否は理由をログで確認して既存アップロードへCSVだけ再適用する案内を実コードと照合。"
+    },
+    "manual.html": {
+      "role": "procedure",
+      "topic": "html-manual",
+      "dependsOn": [
+        "program/stock_tagger.py",
+        "program/shutterstock_portal.py",
+        "program/app.py"
+      ],
+      "contentSha256": "1752e9821124f009d10e1481e6f1481a8b70cb20f7a70907449ce231be2c862b",
+      "reviewedDependencies": {
+        "program/stock_tagger.py": "2f4f9b11b3b503df6c5ced2e02162680ad901c4fd85101d30352e24d2d4b6d6e",
+        "program/shutterstock_portal.py": "45e539c1473b1d924e6e421ac1498ae881ba2dd93b8b5be0282cf68d30a62a7a",
+        "program/app.py": "e2fbc8751c222c0908196e5869fe21024e6e23e75c9357123e99f4f809f2f345"
+      },
+      "reviewedAt": "2026-11-02T08:12:36.453506+00:00",
+      "reviewNote": "従来のCSV反映遅延だけを原因とする表を置換。行拒否と動画非対応カテゴリーを先に調べ、アップロード済みファイルを二重送信しない案内を確認。HTML構造も解析確認。"
+    },
+    "CHANGELOG.md": {
+      "role": "evidence",
+      "topic": "release-changes",
+      "dependsOn": [
+        "program/stock_tagger.py",
+        "program/shutterstock_portal.py",
+        "program/app.py",
+        "tests/test_shutterstock_csv.py"
+      ],
+      "contentSha256": "0853e5bb4d4c8d0224f7a123a02899302e2cbe1eca91e1a8d0554ec7d283793e",
+      "reviewedDependencies": {
+        "program/stock_tagger.py": "2f4f9b11b3b503df6c5ced2e02162680ad901c4fd85101d30352e24d2d4b6d6e",
+        "program/shutterstock_portal.py": "45e539c1473b1d924e6e421ac1498ae881ba2dd93b8b5be0282cf68d30a62a7a",
+        "program/app.py": "e2fbc8751c222c0908196e5869fe21024e6e23e75c9357123e99f4f809f2f345",
+        "tests/test_shutterstock_csv.py": "194f06d57604e3fa93834a906ed1a5eac0f6b9d5e2478fd5231aeecad1f5887f"
+      },
+      "reviewedAt": "2026-11-02T08:12:36.462679+00:00",
+      "reviewNote": "2026-11-02の同一コミットに含まれるShutterstock限定3修正を記載。G版の本番13件成功とロジック8箇所の一致、公開版オフライン8テスト合格を照合。"
+    }
+  }
+}

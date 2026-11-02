@@ -1701,6 +1701,9 @@ class StockTaggerApp:
                     headless=False,
                     skip_submit=self.test_mode,
                 )
+                if (portal_result.get("errors") or portal_result.get("csv_unapplied")
+                        or portal_result.get("unsubmitted") or portal_result.get("unverified")):
+                    raise RuntimeError("Shutterstock のCSV適用・提出が完了していません: " + str(portal_result))
                 log(f"[OK] Shutterstock ポータル提出完了！")
                 if portal_result["errors"]:
                     for e in portal_result["errors"]:
