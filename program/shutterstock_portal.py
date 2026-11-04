@@ -193,6 +193,38 @@ def _verify_csv_applied(page, csv_path: Path, log, label: str = "") -> bool:
     return True
 
 
+# 動画タブで当てる CSV に入れる拡張子（Shutterstock が動画として受ける形式）
+_VIDEO_EXTS = {".mp4", ".mov", ".avi"}
+
+
+def _video_only_csv(csv_path: Path, log):
+    """CSV から動画の行だけを抜き出した CSV を一時フォルダに作って返す。動画の行が無ければ None。
+
+    動画タブで当てるのは、写真タブで画像を提出し終えたあと。全行の CSV をそのまま当てると、
+    提出済みの画像・ベクターの行に Shutterstock が「このファイルは見つかりませんでした」を返す
+    （2026-11-04 から。11-03 までは同じ形でもエラーにならなかった）。
+    それを取り込みエラーとして止めると、動画が提出されないまま残る。
+    一時フォルダに置くのは、csv_output に置くと次回の shutterstock_*.csv の読み込みに混ざるため。
+    """
+    import csv as _csv
+    import tempfile
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = _csv.DictReader(f)
+        fields = reader.fieldnames
+        rows = [r for r in reader
+                if Path((r.get("Filename") or "").strip()).suffix.lower() in _VIDEO_EXTS]
+    if not rows:
+        return None
+    out = Path(tempfile.mkdtemp(prefix="ss_video_csv_")) / f"{csv_path.stem}_video.csv"
+    # 元の CSV と同じ BOM 付き UTF-8。ヘッダーに引用符を付けると全列が無視されるので QUOTE_MINIMAL
+    with open(out, "w", encoding="utf-8-sig", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=fields, quoting=_csv.QUOTE_MINIMAL)
+        w.writeheader()
+        w.writerows(rows)
+    log(f"動画: 動画の行だけの CSV を当てます（{len(rows)}行・提出済みの画像の行は外す）")
+    return out
+
+
 class CSVImportError(RuntimeError):
     """Shutterstock がCSVの行を拒否した。待機や提出では解消しない。"""
 
@@ -572,7 +604,13 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         # 写真タブでの適用は、その日に静止画が無いと「CSVをアップロード」ボタン自体が
                         # 存在せず実行できない。動画だけの日に動画のメタデータが空のまま残るのを防ぐ。
                         # 成功時は全選択まで済むので、失敗したときだけ従来どおり全選択する。
-                        _video_ok, _video_reflected = _apply_csv_on_tab(page, csv_path, log, "動画")
+                        # 当てるのは動画の行だけ（提出済みの画像の行は「見つからない」で拒否されるため）。
+                        _video_csv = _video_only_csv(csv_path, log)
+                        if _video_csv is None:
+                            log("[!] 動画: CSV に動画の行がありません。動画タブでの CSV 適用をスキップします")
+                            _video_ok, _video_reflected = False, False
+                        else:
+                            _video_ok, _video_reflected = _apply_csv_on_tab(page, _video_csv, log, "動画")
                         if not _video_ok:
                             _select_all(page, log)
                         if not _video_reflected:
