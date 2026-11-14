@@ -11,6 +11,11 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from paths import PIXTA_SESSION as SESSION_FILE
 UPLOAD_URL = "https://pixta.jp/mypage/upload/new_footage"
+# 待ち一覧は初期表示が 1 ページ 10 件。イラスト側（pixta_portal）と同じく 100 件表示・新しい順で開く。
+# 2026-11-14 事故: 18 本上げたら 10 件しか見えず「全件のタイトル欄がそろう」を 10 分待って
+# タイムアウト → タイトル・タグを 1 件も入れないまま終わった。
+LIST_URL = UPLOAD_URL + "#per_page=100&sort=4"
+LIST_PER_PAGE = "100"
 
 
 def _check_ai_generated_on_list(page, log, ai_filenames=None):
@@ -244,6 +249,42 @@ def _click_save_input(page, log, answer: str = "no") -> bool:
         return False
 
 
+def _open_pending_list(page, log):
+    """待ち一覧を 100 件表示で開き直す。
+
+    同じパスでハッシュだけ違う URL への goto はページを読み直さないことがあるので、
+    goto の後に reload して、表示件数の欄が 100 になっているかを画面で確かめる。
+    """
+    _goto_upload_page(page, LIST_URL, log)
+    page.reload(wait_until="domcontentloaded", timeout=60000)
+    time.sleep(4)
+    try:
+        current = page.locator("#per_page").first.input_value(timeout=10000)
+    except Exception:
+        current = None
+    if current != LIST_PER_PAGE:
+        log(f"  表示件数が {current} のままなので {LIST_PER_PAGE} に切り替えます")
+        page.locator("#per_page").first.select_option(LIST_PER_PAGE)
+        time.sleep(5)
+        current = page.locator("#per_page").first.input_value(timeout=10000)
+    if current != LIST_PER_PAGE:
+        raise RuntimeError(f"待ち一覧を {LIST_PER_PAGE} 件表示にできませんでした（今: {current}）")
+
+
+def _pending_items(page) -> dict:
+    """待ち一覧に見えている作品を {ファイル名の stem（小文字）: (item_id, タイトル欄が出ているか)} で返す。"""
+    found = {}
+    for item_id in page.locator("input.submit_items").evaluate_all("els => els.map(el => el.id)"):
+        try:
+            raw = page.locator(f'[id="{item_id}-filename"]').inner_text(timeout=3000).strip()
+        except Exception:
+            continue
+        stem = Path(raw.split("/")[-1].strip()).stem.lower()
+        ready = page.locator(f'[id="{item_id}-title"]').count() > 0
+        found[stem] = (item_id, ready)
+    return found
+
+
 def _read_item_state(page, item_id: str):
     """リロード後の画面から、その作品のタイトル文字列と反映済みタグ数を読む。
 
@@ -384,30 +425,30 @@ def run_footage_upload(
             log("Waiting for thumbnail generation (3 min initial wait, then polling every 60s)...")
             log("  Waiting 3 minutes for thumbnail generation...")
             time.sleep(180)
+            # 数ではなく「上げた動画のファイル名が全部、タイトル欄つきで一覧に見えているか」で判定する。
+            # 数だと 1 ページの表示件数で頭打ちになり、前から残っている作品が混ざると早合点もする。
             title_visible = False
-            expected_inputs = len(files)
+            want_stems = [Path(f).stem.lower() for f in files]
+            waiting = want_stems
             for attempt in range(7):
                 log(f"  Reloading page (attempt {attempt+1}/7)...")
-                page.reload(wait_until="domcontentloaded", timeout=30000)
-                time.sleep(3)
-                try:
-                    page.locator("input.title").first.wait_for(state="visible", timeout=5000)
-                    found = len(page.locator("input.title").all())
-                    log(f"  Title inputs found: {found}/{expected_inputs}")
-                    if found >= expected_inputs:
-                        log("All title inputs ready!")
-                        title_visible = True
-                        break
-                    else:
-                        log(f"  Not all thumbnails ready yet. Waiting 60 seconds...")
-                        time.sleep(60)
-                except PWTimeout:
-                    if attempt < 6:
-                        log(f"  Title input not ready yet. Waiting 60 seconds...")
-                        time.sleep(60)
+                _open_pending_list(page, log)
+                pending = _pending_items(page)
+                waiting = [s for s in want_stems if not pending.get(s, (None, False))[1]]
+                log(f"  Title inputs ready: {len(want_stems) - len(waiting)}/{len(want_stems)}")
+                if not waiting:
+                    log("All title inputs ready!")
+                    title_visible = True
+                    break
+                if attempt < 6:
+                    log(f"  まだ: {', '.join(waiting[:5])}{' ほか' if len(waiting) > 5 else ''}。60秒待ちます...")
+                    time.sleep(60)
 
             if not title_visible:
-                raise TimeoutError("Title inputs did not appear within 10 minutes. Check Pixta portal manually.")
+                raise TimeoutError(
+                    f"タイトル欄が出ないまま 10 分たちました（{len(waiting)} 件）: {', '.join(waiting)}。"
+                    "タイトル・タグは入っていません。skip_upload=True で入力と審査申請だけやり直せます。"
+                )
 
             # 各動画にタイトルとタグを入力（ファイル名で対応付け）
             import subprocess as _subprocess
@@ -542,6 +583,15 @@ def run_footage_upload(
                 item_meta[item_id] = (stem, title_text, tags)
                 _apply_metadata(item_id, stem, title_text, tags)
 
+            # 上げた動画のうち一覧で見つからず入力できなかった物があれば、黙って進まずに止める
+            matched = {s for s, _, _ in item_meta.values()}
+            unmatched = [s for s in meta_by_stem if s not in matched]
+            if unmatched:
+                raise RuntimeError(
+                    f"待ち一覧で見つからず、タイトル・タグを入れられなかった動画があります（{len(unmatched)} 件）: "
+                    + ", ".join(unmatched)
+                )
+
             # -------------------------------------------------------
             # Phase 2.5: 「入力を保存」で確定させ、リロードして保存されたか確かめる
             #
@@ -558,7 +608,7 @@ def run_footage_upload(
                         log("[!] 保存ボタンを押せませんでした。リロード後の読み直しで判定します。")
                     # item_id は素材固有の永続 ID で、リロードしても振り直されない
                     # （2026-09-09 に別セッションからの復旧で同一 ID が引けることを実測）
-                    _goto_upload_page(page, UPLOAD_URL, log)
+                    _open_pending_list(page, log)
                     _dismiss_duplicate_confirm_modal(page, log, dup_modal_answer)
 
                     unsaved = []
