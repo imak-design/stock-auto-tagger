@@ -616,10 +616,14 @@ def write_adobe_stock_csv(results: list, output_path: Path, append: bool = False
 
 SHUTTERSTOCK_VIDEO_CATEGORIES = frozenset({
     "Animals/Wildlife", "Art", "Backgrounds/Textures", "Buildings/Landmarks",
-    "Business/Finance", "Education", "Food and Drink", "Healthcare/Medical",
+    "Business/Finance", "Education", "Food and Drink", "Health care",
     "Holidays", "Industrial", "Nature", "Objects", "People", "Religion",
     "Science", "Signs/Symbols", "Sports/Recreation", "Technology", "Transportation",
 })
+
+# 動画だけ英語名が画像と違うカテゴリー。画像の "Healthcare/Medical" を動画に書くと
+# 「無効なカテゴリー」で行ごと弾かれる。
+SHUTTERSTOCK_VIDEO_CATEGORY_OVERRIDES = {"ヘルスケア・医療": "Health care"}
 
 
 def _validate_shutterstock_video_categories(filename, categories, is_video=None):
@@ -632,7 +636,8 @@ def _validate_shutterstock_video_categories(filename, categories, is_video=None)
     if not 1 <= len(values) <= 2 or invalid:
         raise ValueError(
             f"Shutterstock 動画カテゴリーが無効です: {filename}: {categories!r}。"
-            "Abstract など画像専用のカテゴリーは動画に使えません。"
+            "Abstract など画像専用のカテゴリーは動画に使えません"
+            "（医療は動画では Healthcare/Medical ではなく Health care）。"
         )
 
 
@@ -661,6 +666,15 @@ def write_shutterstock_csv(results: list, output_path: Path, append: bool = Fals
         "レトロ・ビンテージ": "Vintage", "抽象": "Abstract",
         "美容・ファッション": "Beauty/Fashion", "有名人": "Celebrities",
     }
+
+    def _is_video(r):
+        return r.get("file_type") == "video" or Path(r.get("filename", "")).suffix.lower() in UPLOAD_VIDEO_EXTENSIONS
+
+    def _cat_en(ja, is_video, default):
+        if is_video and ja in SHUTTERSTOCK_VIDEO_CATEGORY_OVERRIDES:
+            return SHUTTERSTOCK_VIDEO_CATEGORY_OVERRIDES[ja]
+        return ss_cat_map.get(ja, default)
+
     # 検証失敗で既存CSVを空にしたり、一部だけ追記したりしない。
     for r in results:
         filename = r.get("filename", "")
@@ -670,11 +684,9 @@ def write_shutterstock_csv(results: list, output_path: Path, append: bool = Fals
         cat2 = r.get("shutterstock_category2", "")
         if not cat1:
             cat1, cat2 = ADOBE_TO_SHUTTERSTOCK.get(r.get("adobe_category", ""), ("自然", "アート"))
-        values = [ss_cat_map.get(cat1, "miscellaneous"), ss_cat_map.get(cat2, "")]
-        _validate_shutterstock_video_categories(
-            filename, ",".join(c for c in values if c),
-            r.get("file_type") == "video" or Path(filename).suffix.lower() in UPLOAD_VIDEO_EXTENSIONS,
-        )
+        video = _is_video(r)
+        values = [_cat_en(cat1, video, "miscellaneous"), _cat_en(cat2, video, "")]
+        _validate_shutterstock_video_categories(filename, ",".join(c for c in values if c), video)
     mode = "a" if append else "w"
     with open(output_path, mode, newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
@@ -690,8 +702,9 @@ def write_shutterstock_csv(results: list, output_path: Path, append: bool = Fals
             if not cat1_ja:
                 fallback = ADOBE_TO_SHUTTERSTOCK.get(r.get("adobe_category", ""), ("自然", "アート"))
                 cat1_ja, cat2_ja = fallback
-            cat1_en = ss_cat_map.get(cat1_ja, "miscellaneous")
-            cat2_en = ss_cat_map.get(cat2_ja, "")
+            video = _is_video(r)
+            cat1_en = _cat_en(cat1_ja, video, "miscellaneous")
+            cat2_en = _cat_en(cat2_ja, video, "")
             categories = f"{cat1_en},{cat2_en}" if cat2_en else cat1_en
             keywords_raw = r.get("shutterstock_keywords_en", "")
             keywords_list = [k.strip() for k in keywords_raw.split(",") if k.strip()]

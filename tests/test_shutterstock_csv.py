@@ -25,7 +25,8 @@ class ShutterstockCsvTests(unittest.TestCase):
     def setUp(self):
         self.ns = {"Path": Path, "csv": csv}
         load_definitions("stock_tagger.py", {
-            "SHUTTERSTOCK_VIDEO_CATEGORIES", "UPLOAD_VIDEO_EXTENSIONS", "ADOBE_TO_SHUTTERSTOCK",
+            "SHUTTERSTOCK_VIDEO_CATEGORIES", "SHUTTERSTOCK_VIDEO_CATEGORY_OVERRIDES",
+            "UPLOAD_VIDEO_EXTENSIONS", "ADOBE_TO_SHUTTERSTOCK",
             "_validate_shutterstock_video_categories", "validate_shutterstock_csv",
             "write_shutterstock_csv", "filter_keywords",
         }, self.ns)
