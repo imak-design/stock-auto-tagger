@@ -1229,6 +1229,18 @@ class StockTaggerApp:
                     log("     CSV は csv_output に残してあります。ポータルで当て直してください。")
                     blocking_issues.append(("Shutterstock", f"CSV が適用されていません（{detail_csv}）"))
 
+                # 提出上限（7日で動画100本・画像500点）で残した分。メタデータは入っていて、
+                # 上限が空けば次回の「全選択→送信」で一緒に出るので、ファイル移動は止めない
+                # （止めると次回 Adobe・PIXTA へ二重に上がる）。
+                limited = ss_portal_result.get("limited") or []
+                if limited:
+                    detail_lim = " / ".join(f"{lbl} {n}本" for lbl, n, _m in limited)
+                    log(f"[!] Shutterstock: 提出上限（7日で動画100本・画像500点）のため未送信に残しました（{detail_lim}）")
+                    log(f"     ポータルの返事: {limited[0][2]}")
+                    log("     説明・キーワード・カテゴリーは入っています。再アップロード不要・厳禁。")
+                    log("     上限が空いた後の次回アップロードで自動的に一緒に提出されます（ポータルの未送信タブから送信しても可）。")
+                    manual_services.append(("Shutterstock", f"提出上限で未送信に残した分があります（{detail_lim}・次回提出）"))
+
                 unsub = ss_portal_result.get("unsubmitted") or []
                 if unsub:
                     detail = " / ".join(f"{lbl} {txt}" for lbl, txt in unsub)
@@ -1237,7 +1249,7 @@ class StockTaggerApp:
                     log("     ポータルの未送信タブを確認してください。")
                     log("     ファイルはアップロード済みのため、再アップロードは不要・厳禁です。")
                     blocking_issues.append(("Shutterstock", f"未提出が残っています（{detail}）"))
-                elif not csv_bad:
+                elif not csv_bad and not limited:
                     log("[OK] Shutterstock ポータル提出完了: 全件提出済み")
                 self._uploaded_sites.add("shutterstock")
             except Exception as e:
@@ -1704,6 +1716,8 @@ class StockTaggerApp:
                 if (portal_result.get("errors") or portal_result.get("csv_unapplied")
                         or portal_result.get("unsubmitted") or portal_result.get("unverified")):
                     raise RuntimeError("Shutterstock のCSV適用・提出が完了していません: " + str(portal_result))
+                for _lbl, _n, _m in portal_result.get("limited") or []:
+                    log(f"[!] Shutterstock: 提出上限のため {_lbl} {_n}本を未送信に残しました（次回提出）: {_m}")
                 log(f"[OK] Shutterstock ポータル提出完了！")
                 if portal_result["errors"]:
                     for e in portal_result["errors"]:

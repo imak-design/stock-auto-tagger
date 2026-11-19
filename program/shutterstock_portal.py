@@ -127,6 +127,122 @@ def _wait_not_submitted_cleared(page, log, label, timeout=90, reload_every=15):
     return "unknown", last_text
 
 
+# 提出の本番の通信（画面は何も出さないので、成否はこの応答でしか分からない）
+_SUBMIT_API = "/api/next/media/submit"
+
+
+def _is_limit_error(code: str) -> bool:
+    return "MAX_SUBMISSION_COUNT_EXCEEDED" in (code or "")
+
+
+def _click_submit(page, log, label: str, timeout_s: int = 20):
+    """送信ボタンを押し、本番の提出通信（preview=false）の応答を読んで返す。
+
+    Shutterstock の提出上限（7日で動画100本・画像500点）の残り枠より多い束を送ると、
+    batchError ERROR_VIDEO_MAX_SUBMISSION_COUNT_EXCEEDED で束ごと拒否され、1本も
+    提出されない。画面には何も出ない（2026-11-19 確認）。1本ずつなら残り枠ぶんは通る。
+
+    戻り値: {"clicked": bool, "seen": bool, "code": str, "message": str,
+             "ok_count": int, "item_errors": list}
+    """
+    result = {"clicked": False, "seen": False, "code": "", "message": "",
+              "ok_count": 0, "item_errors": []}
+    finals = []
+
+    def _on_response(r):
+        try:
+            if _SUBMIT_API not in r.url or r.request.method != "POST":
+                return
+            body = r.request.post_data or ""
+            if '"preview":"true"' in body.replace(" ", ""):
+                return
+            finals.append(r.json())
+        except Exception:
+            pass
+
+    page.on("response", _on_response)
+    try:
+        btn = page.locator('[data-testid="edit-dialog-submit-button"]')
+        try:
+            btn.wait_for(state="visible", timeout=8000)
+        except PWTimeout:
+            log(f"[NG] {label}: 提出ボタンが見つかりません")
+            return result
+        btn.click()
+        result["clicked"] = True
+        deadline = time.time() + timeout_s
+        while not finals and time.time() < deadline:
+            page.wait_for_timeout(500)
+        time.sleep(2)
+    finally:
+        try:
+            page.remove_listener("response", _on_response)
+        except Exception:
+            pass
+
+    if finals:
+        data = finals[-1] or {}
+        be = data.get("batchError") or {}
+        result.update(seen=True,
+                      code=be.get("code") or "",
+                      message=be.get("message") or "",
+                      ok_count=len(data.get("success") or []),
+                      item_errors=data.get("itemErrors") or [])
+    return result
+
+
+def _deselect_all(page):
+    for cb in page.locator('input[type="checkbox"]').all():
+        try:
+            if cb.is_checked():
+                cb.click(force=True)
+                time.sleep(0.1)
+        except Exception:
+            pass
+
+
+def _submit_one_by_one(page, log, label: str):
+    """上限で束ごと拒否されたとき、1本ずつ送って残り枠ぶんだけ提出する。
+
+    上限に当たった時点で止める。戻り値: (提出できた数, 上限で残した数, 上限のメッセージ)
+    """
+    sent = 0
+    limit_msg = ""
+    while True:
+        try:
+            page.reload(wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            pass
+        time.sleep(4)
+        _close_popups(page)
+        cbs = page.locator('input[type="checkbox"]')
+        try:
+            cbs.first.wait_for(state="visible", timeout=15000)
+        except PWTimeout:
+            return sent, 0, limit_msg  # 残りなし
+        total = cbs.count()
+        if total == 0:
+            return sent, 0, limit_msg
+        _deselect_all(page)
+        try:
+            cbs.first.click(force=True)
+        except Exception as e:
+            log(f"[!] {label}: 1本目の選択に失敗しました: {e}")
+            return sent, total, limit_msg
+        time.sleep(2)
+        r = _click_submit(page, log, label)
+        if _is_limit_error(r["code"]):
+            limit_msg = r["message"]
+            log(f"[!] {label}: Shutterstock の提出上限（直近7日で動画100本・画像500点）に達しました。"
+                f"{sent}本を提出し、残り{total}本は未送信に残します")
+            return sent, total, limit_msg
+        if not r["seen"] or r["code"] or r["item_errors"]:
+            log(f"[!] {label}: 1本ずつの提出で想定外の応答（{r['code']} {r['message']} "
+                f"{r['item_errors']}）。ここで止めます")
+            return sent, total, limit_msg
+        sent += 1
+
+
 def _csv_english_keywords(csv_path: Path) -> set:
     """CSV に書かれた英語キーワードの集合（小文字）を返す。読めなければ空集合。"""
     import csv as _csv
@@ -391,6 +507,9 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
     # 空でなければ、その素材は説明・キーワード・カテゴリーが入っていない。
     # app.py はこれを見てファイル移動を止める。
     csv_unapplied = []
+    # 提出上限（7日で動画100本・画像500点）で残した素材 [(種類, 本数, ポータルのメッセージ)]。
+    # メタデータは入っていて、上限が空けば次回の「全選択→送信」で一緒に出る（21日以内）。
+    limited = []
 
     _own_playwright = playwright_instance is None
     p = sync_playwright().start() if _own_playwright else playwright_instance
@@ -560,14 +679,17 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 log("画像: 審査提出中...")
                 # 送信ボタンは素材が選択されている時のみ表示されるため、直前に再選択
                 _ensure_all_selected(page, log)
-                submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
-                try:
-                    submit_btn.wait_for(state="visible", timeout=10000)
-                    submit_btn.click()
-                    time.sleep(4)
+                _r = _click_submit(page, log, "画像")
+                if _r["clicked"]:
                     log("[OK] 画像: 送信ボタンクリック完了")
-                except PWTimeout:
-                    log("[NG] 提出ボタンが見つかりません")
+                if _is_limit_error(_r["code"]):
+                    log(f"[!] 画像: Shutterstock の提出上限で束ごと拒否されました（{_r['message']}）")
+                    log("    1点ずつ送って、残り枠ぶんだけ提出します")
+                    _sent, _left, _msg = _submit_one_by_one(page, log, "画像")
+                    log(f"    1点ずつ提出 {_sent}点 / 上限で残した {_left}点")
+                    if _left:
+                        # 写真が無い日は写真タブにも動画のカードが並ぶ（2026-11-19 確認）
+                        limited.append(("素材", _left, _msg or _r["message"]))
 
                 # ★ここでは成否を判定しない。
                 #   「未送信」カウンタは写真+動画を合算した全体の残数なので、
@@ -617,20 +739,25 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                             log("[NG] 動画: CSV が適用されていません。ファイル移動を止めます")
                             csv_unapplied.append("動画")
 
-                        submit_btn = page.locator('[data-testid="edit-dialog-submit-button"]')
-                        try:
-                            submit_btn.wait_for(state="visible", timeout=8000)
-                            submit_btn.click()
-                            time.sleep(4)
+                        _r = _click_submit(page, log, "動画")
+                        if _r["clicked"]:
                             log("[OK] 動画: 提出ボタンクリック完了")
-                        except PWTimeout:
-                            log("[NG] 動画: 提出ボタンが見つかりません")
+                        if _is_limit_error(_r["code"]):
+                            log(f"[!] 動画: Shutterstock の提出上限で束ごと拒否されました（{_r['message']}）")
+                            log("    1本ずつ送って、残り枠ぶんだけ提出します")
+                            _sent, _left, _msg = _submit_one_by_one(page, log, "動画")
+                            log(f"    動画: 1本ずつ提出 {_sent}本 / 上限で残した {_left}本")
+                            if _left:
+                                limited.append(("動画", _left, _msg or _r["message"]))
 
                         # ★写真・動画の提出が両方終わったのでここで 1 回だけ判定する。
                         #   カウンタは合算なので、残っていても種別は特定できない。
                         #   ラベルは「未送信」にして、写真のせいだと決めつけない。
                         state, tab_text_after = _wait_not_submitted_cleared(page, log, "未送信")
-                        if state == "remains":
+                        if state == "remains" and limited:
+                            # 残りは提出上限のせい（ポータルの返事で確定）。条件不足ではない
+                            log(f"[!] 未送信に残った分は提出上限によるものです: {tab_text_after}")
+                        elif state == "remains":
                             unsubmitted.append(("未送信", tab_text_after))
                         elif state == "unknown":
                             unverified.append(("未送信", tab_text_after or "カウンタ読み取り不能"))
@@ -679,6 +806,7 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
         "unsubmitted": unsubmitted,
         "unverified": unverified,
         "csv_unapplied": csv_unapplied,
+        "limited": limited,
     }
 
 
