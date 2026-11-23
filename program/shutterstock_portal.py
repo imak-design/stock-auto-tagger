@@ -475,6 +475,24 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
         return False, False
 
 
+def _has_photos_on_portal(page, files, log) -> bool:
+    """未送信に画像（写真・ベクター）があるか。画像タブで CSV を当てて提出するかの判定。
+
+    画像が1つも無い日は、画像タブに「CSVをアップロード」ボタンが出ない
+    （2026-11-22 実機：画像 (0)／動画 (13) で画像タブにボタンなし・動画タブにはある）。
+    files（今回上げたファイル）があればその拡張子で決める。
+    files が無い（上げずに CSV 適用と提出だけを回す）ときは、画像タブに CSV ボタンが出ているかで決める。
+    """
+    if files:
+        return any(Path(f).suffix.lower() not in _VIDEO_EXTS for f in files)
+    try:
+        page.locator('button[data-testid="csv-upload"]').wait_for(state="visible", timeout=15000)
+        return True
+    except PWTimeout:
+        log("画像: 画像タブに CSV ボタンがありません（未送信の画像なし）")
+        return False
+
+
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
                           files: list = None, expected_count: int = 0, skip_submit: bool = False,
                           no_wait: bool = False, playwright_instance=None):
@@ -617,54 +635,61 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                     else:
                         log(f"[!] 再待機タイムアウト: {current}/{expected}件で続行します")
 
-            # ============================================================
-            # STEP 3: CSVメタデータを適用（全選択はCSV反映後に行う）
-            # ============================================================
-            log(f"CSV適用中: {csv_path.name}")
-            csv_btn = page.locator('button[data-testid="csv-upload"]')
-            try:
-                csv_btn.wait_for(state="visible", timeout=8000)
-            except PWTimeout:
-                raise RuntimeError("CSV アップロードボタンが見つかりません")
-            csv_btn.click()
-            time.sleep(1)
+            # 未送信の画像が 0件の日は、画像タブに「CSVをアップロード」ボタンが出ない
+            # （2026-11-22 実機）。探すと「CSV アップロードボタンが見つかりません」で全体が止まるので、
+            # 画像タブの CSV・提出は飛ばして、動画タブ（STEP 5）で CSV を当てて提出する。
+            has_photo = _has_photos_on_portal(page, files, log)
+            if not has_photo:
+                log("画像: 未送信の画像が 0件なので、画像タブの CSV・提出は飛ばして動画タブへ進みます")
+            if has_photo:
+                # ============================================================
+                # STEP 3: CSVメタデータを適用（全選択はCSV反映後に行う）
+                # ============================================================
+                log(f"CSV適用中: {csv_path.name}")
+                csv_btn = page.locator('button[data-testid="csv-upload"]')
+                try:
+                    csv_btn.wait_for(state="visible", timeout=8000)
+                except PWTimeout:
+                    raise RuntimeError("CSV アップロードボタンが見つかりません")
+                csv_btn.click()
+                time.sleep(1)
 
-            dialog = page.locator('[role="dialog"]')
-            try:
-                dialog.wait_for(state="visible", timeout=8000)
-                log("CSVアップロードダイアログを開きました")
-            except PWTimeout:
-                raise RuntimeError("CSVアップロードダイアログが開きません")
+                dialog = page.locator('[role="dialog"]')
+                try:
+                    dialog.wait_for(state="visible", timeout=8000)
+                    log("CSVアップロードダイアログを開きました")
+                except PWTimeout:
+                    raise RuntimeError("CSVアップロードダイアログが開きません")
 
-            with page.expect_file_chooser(timeout=10000) as fc_info:
-                dialog.get_by_role("button", name=re.compile("アップロード", re.I)).click()
-            fc_info.value.set_files(str(csv_path))
-            log(f"CSV セット完了: {csv_path.name}")
-            page.wait_for_timeout(4000)
-            _check_csv_import_result(page, log)
-
-            # ダイアログが閉じるのを待つ（最大10秒）
-            for _ in range(10):
+                with page.expect_file_chooser(timeout=10000) as fc_info:
+                    dialog.get_by_role("button", name=re.compile("アップロード", re.I)).click()
+                fc_info.value.set_files(str(csv_path))
+                log(f"CSV セット完了: {csv_path.name}")
+                page.wait_for_timeout(4000)
                 _check_csv_import_result(page, log)
-                if not dialog.is_visible():
-                    break
-                page.wait_for_timeout(1000)
 
-            # ページリロード → ポップアップ閉じ
-            page.reload(wait_until="domcontentloaded", timeout=30000)
-            time.sleep(5)
-            _close_popups(page)
+                # ダイアログが閉じるのを待つ（最大10秒）
+                for _ in range(10):
+                    _check_csv_import_result(page, log)
+                    if not dialog.is_visible():
+                        break
+                    page.wait_for_timeout(1000)
 
-            # CSVメタデータ反映を待つ（上限 CSV_REFLECT_TIMEOUT_S。超えたら諦めて先へ進む）。
-            # 全選択は _wait_csv_reflected が毎回やり直す
-            # （reload は選択を解除し、送信ボタンを消すため）。
-            if _wait_csv_reflected(page, csv_path, log):
-                log("CSV適用完了")
-            else:
-                # 反映を確認できないまま提出しても、必須項目が空なので「未送信」に残るだけ。
-                # ここで握り潰すと後段のファイル移動まで走ってしまうので、必ず戻り値に載せる。
-                log("[NG] 画像: CSV が適用されていません。ファイル移動を止めます")
-                csv_unapplied.append("画像")
+                # ページリロード → ポップアップ閉じ
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                time.sleep(5)
+                _close_popups(page)
+
+                # CSVメタデータ反映を待つ（上限 CSV_REFLECT_TIMEOUT_S。超えたら諦めて先へ進む）。
+                # 全選択は _wait_csv_reflected が毎回やり直す
+                # （reload は選択を解除し、送信ボタンを消すため）。
+                if _wait_csv_reflected(page, csv_path, log):
+                    log("CSV適用完了")
+                else:
+                    # 反映を確認できないまま提出しても、必須項目が空なので「未送信」に残るだけ。
+                    # ここで握り潰すと後段のファイル移動まで走ってしまうので、必ず戻り値に載せる。
+                    log("[NG] 画像: CSV が適用されていません。ファイル移動を止めます")
+                    csv_unapplied.append("画像")
 
             # ============================================================
             # STEP 4: 画像を審査提出
@@ -676,21 +701,25 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                 _ensure_all_selected(page, log)
                 log("[テストモード] 審査提出ボタンの手前で停止します。ブラウザで手動操作してください。")
             else:
-                log("画像: 審査提出中...")
-                # 送信ボタンは素材が選択されている時のみ表示されるため、直前に再選択
-                _ensure_all_selected(page, log)
-                _r = _click_submit(page, log, "画像")
-                if _r["clicked"]:
-                    log("[OK] 画像: 送信ボタンクリック完了")
-                if _is_limit_error(_r["code"]):
-                    log(f"[!] 画像: Shutterstock の提出上限で束ごと拒否されました（{_r['message']}）")
-                    log("    1点ずつ送って、残り枠ぶんだけ提出します")
-                    _sent, _left, _msg = _submit_one_by_one(page, log, "画像")
-                    log(f"    1点ずつ提出 {_sent}点 / 上限で残した {_left}点")
-                    if _left:
-                        # 写真が無い日は写真タブにも動画のカードが並ぶ（2026-11-19 確認）
-                        limited.append(("素材", _left, _msg or _r["message"]))
-
+                if has_photo:
+                    log("画像: 審査提出中...")
+                    # 送信ボタンは素材が選択されている時のみ表示されるため、直前に再選択
+                    _ensure_all_selected(page, log)
+                    _r = _click_submit(page, log, "画像")
+                    if _r["clicked"]:
+                        log("[OK] 画像: 送信ボタンクリック完了")
+                    if _is_limit_error(_r["code"]):
+                        log(f"[!] 画像: Shutterstock の提出上限で束ごと拒否されました（{_r['message']}）")
+                        log("    1点ずつ送って、残り枠ぶんだけ提出します")
+                        _sent, _left, _msg = _submit_one_by_one(page, log, "画像")
+                        log(f"    1点ずつ提出 {_sent}点 / 上限で残した {_left}点")
+                        if _left:
+                            # 写真が無い日は写真タブにも動画のカードが並ぶ（2026-11-19 確認）
+                            limited.append(("素材", _left, _msg or _r["message"]))
+                else:
+                    # 画像が無い日の画像タブには動画のカードが並ぶ（2026-11-19 確認）。ここで送ると
+                    # CSV の当たっていない動画を出すことになるので、動画タブ（STEP 5）だけで出す。
+                    log("画像: 未送信の画像が無いので、画像タブの提出は飛ばします")
                 # ★ここでは成否を判定しない。
                 #   「未送信」カウンタは写真+動画を合算した全体の残数なので、
                 #   この時点ではまだ提出していない動画の分が必ず残って見える。
