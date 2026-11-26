@@ -3,6 +3,7 @@ import ast
 import csv
 from pathlib import Path
 import tempfile
+import time
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -86,14 +87,17 @@ class ShutterstockCsvTests(unittest.TestCase):
 
 
 class CsvImportResultTests(unittest.TestCase):
+    upload_name = "current_attempt.csv"
+
     def setUp(self):
         import re
         self.ns = {"re": re}
         load_definitions("shutterstock_portal.py", {"CSVImportError", "_check_csv_import_result"}, self.ns)
 
-    def page(self, text, errors):
+    def page(self, text, errors, matches_upload=True):
         dialog = Mock()
         dialog.inner_text.return_value = text
+        dialog.get_by_text.return_value.count.return_value = int(matches_upload)
         rows, close = Mock(), Mock()
         rows.all_inner_texts.return_value = errors
         dialog.locator.side_effect = lambda selector: rows if selector == '[data-testid="row error"]' else close
@@ -108,23 +112,126 @@ class CsvImportResultTests(unittest.TestCase):
     def test_partial_import_reports_filename_and_reason(self):
         page, close = self.page("13行中3行が正常に処理されました。\nアップロードエラー: 10\nsnow.mp4: 無効なカテゴリー", ["snow.mp4: 無効なカテゴリー"])
         with self.assertRaisesRegex(self.ns["CSVImportError"], "snow.mp4"):
-            self.ns["_check_csv_import_result"](page, Mock())
+            self.ns["_check_csv_import_result"](page, Mock(), self.upload_name)
         close.click.assert_not_called()
 
     def test_all_success_ignores_stale_error_details(self):
         page, close = self.page("13行中13行が正常に処理されました。\nアップロードエラー: 0", ["previous failure"])
-        self.ns["_check_csv_import_result"](page, Mock())
+        self.ns["_check_csv_import_result"](page, Mock(), self.upload_name)
         close.click.assert_called_once()
 
     def test_inconsistent_totals_do_not_pass_as_success(self):
         page, _ = self.page("13行中3行が正常に処理されました。\nアップロードエラー: 0", [])
         with self.assertRaises(self.ns["CSVImportError"]):
-            self.ns["_check_csv_import_result"](page, Mock())
+            self.ns["_check_csv_import_result"](page, Mock(), self.upload_name)
 
     def test_counted_errors_without_row_details_still_fail(self):
         page, _ = self.page("Upload errors: 1", [])
         with self.assertRaises(self.ns["CSVImportError"]):
-            self.ns["_check_csv_import_result"](page, Mock())
+            self.ns["_check_csv_import_result"](page, Mock(), self.upload_name)
+
+    def test_previous_import_failure_is_dismissed(self):
+        page, close = self.page("アップロードエラー: 19", ["previous failure"], matches_upload=False)
+        self.ns["_check_csv_import_result"](page, Mock(), self.upload_name)
+        close.click.assert_called_once()
+
+
+class ShutterstockUploadFlowTests(unittest.TestCase):
+    def setUp(self):
+        import re
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        self.path = self.folder / "shutterstock.csv"
+        self.path.write_text("Filename,Description\nexisting.mp4,Existing\nnew.mp4,New\nposter.jpg,Poster\n",
+                             encoding="utf-8-sig")
+        session = self.folder / "session-placeholder"
+        session.touch()
+
+        self.page = Mock()
+        self.page.goto.side_effect = lambda url, **kwargs: setattr(self.page, "url", url)
+        self.playwright = Mock()
+        self.playwright.chromium.launch.return_value.new_context.return_value.new_page.return_value = self.page
+        self.pending = {"video": {"existing.mp4", "waiting.mp4"}, "photo": set()}
+        self.ingestion_planned = set()
+        self.page.locator.return_value.first.set_input_files.side_effect = self.record_transfer
+        self.page.request.get.side_effect = self.read_pending
+        self.ns = {
+            "csv": csv, "Path": Path, "re": re, "time": Mock(wraps=time),
+            "TemporaryDirectory": tempfile.TemporaryDirectory, "SESSION_FILE": session,
+            "_close_popups": Mock(), "_ensure_all_selected": Mock(),
+            "_click_submit": Mock(), "_submit_one_by_one": Mock(),
+            "_wait_not_submitted_cleared": Mock(return_value=("remains", "未送信 (1)")),
+            "_apply_csv_on_tab": Mock(side_effect=self.read_csv_for_tab),
+        }
+        load_definitions("shutterstock_portal.py", {
+            "run_portal_automation", "_ingested_names", "_wait_for_ingestion", "_read_csv_rows",
+            "_row_filename", "_csv_for_pending", "_is_limit_error", "_VIDEO_EXTS", "PHOTO_URL",
+            "VIDEO_URL", "INGESTED_URL", "UPLOAD_POLL_SECONDS", "UPLOAD_STALL_SECONDS",
+        }, self.ns)
+        self.ns["time"].sleep.side_effect = lambda *_: None
+        self.csvs_applied = {}
+
+    def record_transfer(self, files):
+        self.ingestion_planned.update(Path(file).name for file in files)
+
+    def read_pending(self, url, params):
+        kind = params["mediaType"]
+        if kind == "video" and self.page.wait_for_timeout.called:
+            self.pending["video"].update(self.ingestion_planned)
+        items = [{"originalFilename": name} for name in self.pending[kind]]
+        return Mock(ok=True, json=Mock(return_value={"data": items, "totalCount": len(items)}))
+
+    def read_csv_for_tab(self, page, path, log, label):
+        with path.open(encoding="utf-8-sig", newline="") as stream:
+            self.csvs_applied[label] = {row["Filename"] for row in csv.DictReader(stream)}
+        return True, True
+
+    def run_portal(self, files, skip_submit=False):
+        stock_tagger = types.ModuleType("stock_tagger")
+        stock_tagger.validate_shutterstock_csv = Mock()
+        with patch.dict("sys.modules", {"stock_tagger": stock_tagger}):
+            return self.ns["run_portal_automation"](
+                self.path, files=[self.folder / file for file in files], skip_submit=skip_submit,
+                no_wait=True, playwright_instance=self.playwright, progress_callback=Mock(),
+            )
+
+    def test_video_test_mode_uploads_only_missing_and_applies_csv_before_stopping(self):
+        result = self.run_portal(["existing.mp4", "new.mp4"], skip_submit=True)
+        self.assertEqual(self.ingestion_planned, {"new.mp4"})
+        self.assertEqual(self.csvs_applied, {"動画": {"existing.mp4", "new.mp4"}})
+        self.assertEqual(result["submitted"], 0)
+        self.page.reload.assert_not_called()
+        self.ns["_click_submit"].assert_not_called()
+
+    def test_missing_upload_never_reaches_csv(self):
+        self.ns["UPLOAD_STALL_SECONDS"] = 0
+        self.page.locator.return_value.first.set_input_files.side_effect = None
+        with self.assertRaisesRegex(RuntimeError, r"CSV 適用前.*new\.mp4"):
+            self.run_portal(["existing.mp4", "new.mp4"], skip_submit=True)
+        self.ns["_apply_csv_on_tab"].assert_not_called()
+
+    def test_previously_uploaded_items_still_get_weekly_limit_fallback(self):
+        self.pending["photo"].add("poster.jpg")
+        self.pending["video"] = {"waiting.mp4"}
+        self.ns["_click_submit"].side_effect = [
+            {"clicked": True, "code": "", "ok_count": 1},
+            {"clicked": True, "code": "ERROR_VIDEO_MAX_SUBMISSION_COUNT_EXCEEDED", "message": "limit", "ok_count": 0},
+        ]
+        self.ns["_submit_one_by_one"].return_value = (0, 1, "limit")
+        result = self.run_portal(["poster.jpg"])
+        self.assertEqual(self.ingestion_planned, set())
+        self.assertEqual(self.csvs_applied, {"画像": {"poster.jpg"}})
+        self.ns["_submit_one_by_one"].assert_called_once_with(self.page, unittest.mock.ANY, "動画")
+        self.assertEqual(result["limited"], [("動画", 1, "limit")])
+
+    def test_video_csv_failure_does_not_click_submit(self):
+        self.ns["_apply_csv_on_tab"].side_effect = None
+        self.ns["_apply_csv_on_tab"].return_value = (True, False)
+        result = self.run_portal(["existing.mp4"])
+        self.assertEqual(result["csv_unapplied"], ["動画"])
+        self.ns["_click_submit"].assert_not_called()
 
 
 if __name__ == "__main__":

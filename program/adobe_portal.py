@@ -8,6 +8,7 @@ Adobe Stock コントリビューターポータル 自動化
 """
 
 import csv
+import re
 import time
 from collections import Counter
 from pathlib import Path
@@ -308,9 +309,17 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                         if select_all.is_visible(timeout=3000) and not select_all.is_checked():
                             select_all.click()
                             time.sleep(1)
-                            log("全ファイルを選択しました。審査登録ボタンを手動で押してください。")
+                        submit_btn = page.locator('[data-t="submit-moderation-button"]').first
+                        submit_btn.wait_for(state="visible", timeout=10000)
+                        blocked = _submit_button_block_reason(page, submit_btn)
+                        if blocked:
+                            errors.append(f"Adobe 審査提出: {blocked}")
+                            log(f"[!] {blocked}")
+                        else:
+                            log("全ファイルを選択しました。審査登録ボタンの手前で停止しました。")
                     except PWTimeout:
-                        log("[!] 全選択チェックボックスが見つかりません")
+                        errors.append("Adobe 審査提出ボタンを確認できません")
+                        log("[!] Adobe 審査提出ボタンを確認できません")
 
         except Exception as e:
             log(f"NG エラー: {e}")
@@ -1130,6 +1139,26 @@ def _verify_submission(page, before_counts, log, rounds: int = 30):
     return False, remaining, None
 
 
+def _submit_button_block_reason(page, submit_btn):
+    """提出ボタンが無効なとき、Adobe が表示する理由を読む。"""
+    if submit_btn.is_enabled():
+        return ""
+
+    help_button = page.locator('[data-t="submit-moderation-button"] + button').first
+    if help_button.is_visible():
+        try:
+            help_button.click(timeout=3000)
+            dialog = page.get_by_role("dialog").filter(
+                has_text=re.compile(r"提出できません|can.?t submit|cannot submit|unable to submit", re.I)
+            ).first
+            reason = " ".join(dialog.inner_text(timeout=3000).split())
+            if reason:
+                return reason
+        except PWTimeout:
+            pass
+    return "Adobe の審査提出ボタンが無効です。ボタン横のヘルプで理由を確認してください。"
+
+
 def _submit_for_review(page, log):
     """
     全ファイルを選択して審査に登録する。
@@ -1184,6 +1213,9 @@ def _submit_for_review(page, log):
             return _fail(f"{challenge}が表示されたため続行できません", manual=True)
         return _fail("審査登録ボタンが見つかりません。画面の状態を確認してください", manual=True)
     log(f"審査登録ボタン: {submit_btn.inner_text().strip()}")
+    blocked = _submit_button_block_reason(page, submit_btn)
+    if blocked:
+        return _fail(blocked)
     submit_btn.click()
     time.sleep(2)
 

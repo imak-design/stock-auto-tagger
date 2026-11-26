@@ -1216,7 +1216,7 @@ class StockTaggerApp:
                 if unver:
                     detail_uv = " / ".join(f"{lbl} {txt}" for lbl, txt in unver)
                     log(f"[!] Shutterstock: 提出の成否を確認できませんでした（{detail_uv}）")
-                    log("     未提出が残っているとは限りません。次回実行時に再確認されます。")
+                    blocking_issues.append(("Shutterstock", f"提出結果を確認できません（{detail_uv}）"))
 
                 # CSV が画面に反映されなかった = 説明・キーワード・カテゴリーが空のまま。
                 # この状態で素材を移動すると、あとで手直しする材料が分からなくなる。
@@ -1249,8 +1249,11 @@ class StockTaggerApp:
                     log("     ポータルの未送信タブを確認してください。")
                     log("     ファイルはアップロード済みのため、再アップロードは不要・厳禁です。")
                     blocking_issues.append(("Shutterstock", f"未提出が残っています（{detail}）"))
-                elif not csv_bad and not limited:
-                    log("[OK] Shutterstock ポータル提出完了: 全件提出済み")
+                elif not (csv_bad or limited or unver):
+                    if self.test_mode:
+                        log("[OK] Shutterstock アップロード・CSV反映完了（テストモード）")
+                    else:
+                        log("[OK] Shutterstock ポータル提出完了: 全件提出済み")
                 self._uploaded_sites.add("shutterstock")
             except Exception as e:
                 log(f"[NG] Shutterstock エラー: {e}")
@@ -1718,7 +1721,10 @@ class StockTaggerApp:
                     raise RuntimeError("Shutterstock のCSV適用・提出が完了していません: " + str(portal_result))
                 for _lbl, _n, _m in portal_result.get("limited") or []:
                     log(f"[!] Shutterstock: 提出上限のため {_lbl} {_n}本を未送信に残しました（次回提出）: {_m}")
-                log(f"[OK] Shutterstock ポータル提出完了！")
+                if self.test_mode:
+                    log("[OK] Shutterstock アップロード・CSV反映完了（テストモード）")
+                elif not portal_result.get("limited"):
+                    log("[OK] Shutterstock ポータル提出完了！")
                 if portal_result["errors"]:
                     for e in portal_result["errors"]:
                         log(f"  [NG] {e}")

@@ -7,14 +7,19 @@ Shutterstock コントリビューターポータル 自動化
 - 動画タブ確認 → 提出
 """
 
+import csv
 import re
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from uuid import uuid4
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from paths import SHUTTERSTOCK_SESSION as SESSION_FILE
 PHOTO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/photo"
 VIDEO_URL = "https://submit.shutterstock.com/ja/portfolio/not_submitted/video"
-
+INGESTED_URL = "https://submit.shutterstock.com/api/next/media/list"
+UPLOAD_POLL_SECONDS = 15
+UPLOAD_STALL_SECONDS = 420
 
 # CSV反映の待ち上限。行の拒否は処理結果モーダルを読んで即時エラーにし、
 # 処理結果がエラーでない場合だけキーワード反映を最大120秒確認する。
@@ -313,43 +318,42 @@ def _verify_csv_applied(page, csv_path: Path, log, label: str = "") -> bool:
 _VIDEO_EXTS = {".mp4", ".mov", ".avi"}
 
 
-def _video_only_csv(csv_path: Path, log):
-    """CSV から動画の行だけを抜き出した CSV を一時フォルダに作って返す。動画の行が無ければ None。
+def _read_csv_rows(csv_path):
+    with csv_path.open(encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        return reader.fieldnames, list(reader)
 
-    動画タブで当てるのは、写真タブで画像を提出し終えたあと。全行の CSV をそのまま当てると、
-    提出済みの画像・ベクターの行に Shutterstock が「このファイルは見つかりませんでした」を返す
-    （2026-11-04 から。11-03 までは同じ形でもエラーにならなかった）。
-    それを取り込みエラーとして止めると、動画が提出されないまま残る。
-    一時フォルダに置くのは、csv_output に置くと次回の shutterstock_*.csv の読み込みに混ざるため。
-    """
-    import csv as _csv
-    import tempfile
-    with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
-        reader = _csv.DictReader(f)
-        fields = reader.fieldnames
-        rows = [r for r in reader
-                if Path((r.get("Filename") or "").strip()).suffix.lower() in _VIDEO_EXTS]
-    if not rows:
+
+def _row_filename(row):
+    return (row.get("Filename") or "").strip()
+
+
+def _csv_for_pending(csv_path, folder, fields, rows, pending_names):
+    """現在の未送信タブに実在する素材の行だけを一時CSVにまとめる。"""
+    selected = [row for row in rows if _row_filename(row) in pending_names]
+    if not selected:
         return None
-    out = Path(tempfile.mkdtemp(prefix="ss_video_csv_")) / f"{csv_path.stem}_video.csv"
-    # 元の CSV と同じ BOM 付き UTF-8。ヘッダーに引用符を付けると全列が無視されるので QUOTE_MINIMAL
-    with open(out, "w", encoding="utf-8-sig", newline="") as f:
-        w = _csv.DictWriter(f, fieldnames=fields, quoting=_csv.QUOTE_MINIMAL)
-        w.writeheader()
-        w.writerows(rows)
-    log(f"動画: 動画の行だけの CSV を当てます（{len(rows)}行・提出済みの画像の行は外す）")
-    return out
+    path = Path(folder) / csv_path.name
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(selected)
+    return path
 
 
 class CSVImportError(RuntimeError):
     """Shutterstock がCSVの行を拒否した。待機や提出では解消しない。"""
 
 
-def _check_csv_import_result(page, log):
+def _check_csv_import_result(page, log, upload_name):
     header = page.locator('[data-testid="CSV error modal header"]')
     if not header.count() or not header.first.is_visible():
         return
     dialog = header.first.locator('xpath=ancestor::*[@role="dialog"][1]')
+    if not dialog.get_by_text(upload_name, exact=True).count():
+        log("Shutterstock: 前回のCSV処理通知を閉じます")
+        dialog.locator('[data-testid="lower-close-button"]').click()
+        return
     details = dialog.inner_text()
     row_errors = dialog.locator('[data-testid="row error"]').all_inner_texts()
     error_count = re.search(r'(?:アップロードエラー|Upload errors?)\s*:\s*(\d+)', details, re.I)
@@ -366,7 +370,7 @@ def _check_csv_import_result(page, log):
     dialog.locator('[data-testid="lower-close-button"]').click()
 
 
-def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
+def _wait_csv_reflected(page, csv_path: Path, upload_name, log, label: str = "",
                         timeout_s: int = CSV_REFLECT_TIMEOUT_S) -> bool:
     """CSV が画面に反映されるまで、ページを更新しながら待つ。
 
@@ -386,7 +390,7 @@ def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
     attempt = 0
     while True:
         attempt += 1
-        _check_csv_import_result(page, log)
+        _check_csv_import_result(page, log, upload_name)
         _close_popups(page)
         _select_all(page, log)
         time.sleep(2)
@@ -402,7 +406,7 @@ def _wait_csv_reflected(page, csv_path: Path, log, label: str = "",
         log(f"[..] {prefix}CSV 反映待ち（{attempt} 回目 / 残り約 {remain} 秒）"
             f"{CSV_REFLECT_POLL_S} 秒後に更新して再確認します")
         page.wait_for_timeout(CSV_REFLECT_POLL_S * 1000)
-        _check_csv_import_result(page, log)
+        _check_csv_import_result(page, log, upload_name)
         try:
             page.reload(wait_until="domcontentloaded", timeout=30000)
         except Exception as e:
@@ -429,8 +433,8 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
     CSV が一度も当たらず、動画が説明もキーワードも空のまま「未送信」に滞留していた
     （2026-08-01 判明: 魔法陣動画 6 本が 1 週間分積み上がっていた）。
 
-    画面操作の失敗は戻り値で上へ伝える。CSVの行拒否はCSVImportErrorを再送出し、
-    具体的な理由を呼び出し元に表示して提出を止める。
+    失敗しても例外にしない（ここで落とすとブラウザの後始末まで巻き添えになる）。
+    代わりに戻り値で必ず上へ伝える。
     """
     try:
         csv_btn = page.locator('button[data-testid="csv-upload"]')
@@ -440,22 +444,26 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
         return False, False
 
     try:
-        log(f"{label}: CSV適用中: {csv_path.name}")
+        # 同じ名前の CSV を再送すると、ポータルが前回のエラー通知を出すことがある。
+        # 元の CSV はそのまま使い、送信時のファイル名で今回の処理結果を区別する。
+        upload_name = f"{csv_path.stem[:128]}_{uuid4().hex[:12]}.csv"
+        log(f"{label}: CSV適用中: {upload_name}")
         csv_btn.click()
         time.sleep(1)
 
-        dialog = page.locator('[role="dialog"]')
+        choose_file = page.get_by_role("button", name=re.compile(r"^(アップロード|Upload)$", re.I))
+        dialog = page.get_by_role("dialog").filter(has=choose_file)
         dialog.wait_for(state="visible", timeout=8000)
 
         with page.expect_file_chooser(timeout=10000) as fc_info:
-            dialog.get_by_role("button", name=re.compile("アップロード", re.I)).click()
-        fc_info.value.set_files(str(csv_path))
-        log(f"{label}: CSV セット完了: {csv_path.name}")
+            dialog.get_by_role("button", name=re.compile(r"^(アップロード|Upload)$", re.I)).click()
+        fc_info.value.set_files({"name": upload_name, "mimeType": "text/csv", "buffer": csv_path.read_bytes()})
+        log(f"{label}: CSV セット完了: {upload_name}")
         page.wait_for_timeout(4000)
-        _check_csv_import_result(page, log)
+        _check_csv_import_result(page, log, upload_name)
 
         for _ in range(10):
-            _check_csv_import_result(page, log)
+            _check_csv_import_result(page, log, upload_name)
             if not dialog.is_visible():
                 break
             page.wait_for_timeout(1000)
@@ -466,7 +474,7 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
         # 反映を更新しながら待つ（上限 CSV_REFLECT_TIMEOUT_S。超えたら諦めて先へ進む）。
         # 全選択は _wait_csv_reflected の中で毎回やり直す
         # （reload は選択を解除し、送信ボタンを消すため）。
-        reflected = _wait_csv_reflected(page, csv_path, log, label)
+        reflected = _wait_csv_reflected(page, csv_path, upload_name, log, label)
         return True, reflected
     except CSVImportError:
         raise
@@ -475,22 +483,51 @@ def _apply_csv_on_tab(page, csv_path: Path, log, label: str):
         return False, False
 
 
-def _has_photos_on_portal(page, files, log) -> bool:
-    """未送信に画像（写真・ベクター）があるか。画像タブで CSV を当てて提出するかの判定。
+def _ingested_names(page, media_types):
+    """未送信一覧と同じ API で、アップロードを中断せずにファイル名を照合する。"""
+    names = set()
+    for media_type in sorted(media_types):
+        page_number = 1
+        while True:
+            response = page.request.get(INGESTED_URL, params={
+                "mediaType": media_type, "workflowStatus": "ingested", "normalize": "true",
+                "includeMediumThumb": "true", "order": "newest", "page": page_number, "perPage": 100,
+            })
+            if not response.ok:
+                raise RuntimeError(f"Shutterstock: 未送信の{media_type}一覧を取得できません（HTTP {response.status}）")
+            payload = response.json()
+            items = payload.get("data")
+            total = payload.get("totalCount")
+            if (not isinstance(items, list) or not isinstance(total, int)
+                    or (not items and total > (page_number - 1) * 100)):
+                raise RuntimeError(f"Shutterstock: 未送信の{media_type}一覧の形式を確認できません")
+            for item in items:
+                filename = item.get("originalFilename") or item.get("uploadedFilename")
+                if not filename:
+                    raise RuntimeError(f"Shutterstock: 未送信の{media_type}に元ファイル名を確認できない素材があります")
+                names.add(filename)
+            if not items or page_number * 100 >= total:
+                break
+            page_number += 1
+    return names
 
-    画像が1つも無い日は、画像タブに「CSVをアップロード」ボタンが出ない
-    （2026-11-22 実機：画像 (0)／動画 (13) で画像タブにボタンなし・動画タブにはある）。
-    files（今回上げたファイル）があればその拡張子で決める。
-    files が無い（上げずに CSV 適用と提出だけを回す）ときは、画像タブに CSV ボタンが出ているかで決める。
-    """
-    if files:
-        return any(Path(f).suffix.lower() not in _VIDEO_EXTS for f in files)
-    try:
-        page.locator('button[data-testid="csv-upload"]').wait_for(state="visible", timeout=15000)
-        return True
-    except PWTimeout:
-        log("画像: 画像タブに CSV ボタンがありません（未送信の画像なし）")
-        return False
+
+def _wait_for_ingestion(page, expected, media_types, already_present, log):
+    """対象が全部そろってから次の画面へ進む。転送中のページは更新しない。"""
+    seen = expected & already_present
+    deadline = time.monotonic() + UPLOAD_STALL_SECONDS
+    while seen != expected:
+        page.wait_for_timeout(UPLOAD_POLL_SECONDS * 1000)
+        current = expected & _ingested_names(page, media_types)
+        if current - seen:
+            deadline = time.monotonic() + UPLOAD_STALL_SECONDS
+        if current != seen:
+            log(f"  Shutterstock 未送信の反映: {len(current)}/{len(expected)}件")
+        seen = current
+        if seen != expected and time.monotonic() >= deadline:
+            missing = ", ".join(sorted(expected - seen))
+            raise RuntimeError(f"Shutterstock: 未送信の反映は {len(seen)}/{len(expected)}件。"
+                               f"CSV 適用前に停止しました。未反映: {missing}")
 
 
 def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool = False,
@@ -512,6 +549,13 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
 
     from stock_tagger import validate_shutterstock_csv
     validate_shutterstock_csv(csv_path)
+    fields, rows = _read_csv_rows(csv_path)
+    targets = {Path(file).name for file in (files or [])}
+    missing_rows = targets - {_row_filename(row) for row in rows}
+    if missing_rows:
+        raise ValueError("Shutterstock: 対象素材の CSV 行がありません: " + ", ".join(sorted(missing_rows)))
+    # 動画だけの実行では画像タブの提出を省く。同じタブの上限待ちの素材は従来どおり一緒に提出する。
+    use_photo_tab = not files or any(Path(name).suffix.lower() not in _VIDEO_EXTS for name in targets)
 
     submitted = 0
     errors = []
@@ -563,8 +607,17 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
             # ============================================================
             # STEP 2: ファイルをブラウザアップロード（files引数がある場合のみ）
             # ============================================================
+            files_to_upload = []
             if files:
-                log(f"アップロード開始: {len(files)}件...")
+                media_types = {"photo" if Path(name).suffix.lower() not in _VIDEO_EXTS else "video"
+                               for name in targets}
+                existing = targets & _ingested_names(page, media_types)
+                files_to_upload = [file for file in files if Path(file).name not in existing]
+                if existing:
+                    log(f"Shutterstock: 未送信にある {len(existing)}件を再利用します")
+
+            if files_to_upload:
+                log(f"アップロード開始: {len(files_to_upload)}件...")
                 # アップロードボタンでドロップゾーンのモーダルを開く。
                 # 2026-09-16 に data-testid が "uploadButton" から "desktop-upload-button" に変わった
                 # （同じ日の 4 分違いの実行で新旧両方を確認＝切り替えの最中）。押すとどちらも同じ dropzone-container が開く。
@@ -590,211 +643,62 @@ def run_portal_automation(csv_path: Path, progress_callback=None, headless: bool
                     file_input.wait_for(state="attached", timeout=10000)
                 except PWTimeout:
                     file_input = page.locator('input[type="file"]').last  # フォールバック
-                file_input.set_input_files([str(f) for f in files])
-                log(f"Files set: {[Path(f).name for f in files]}")
+                file_input.set_input_files([str(file) for file in files_to_upload])
+                log(f"Files set: {[Path(file).name for file in files_to_upload]}")
+                log("Shutterstock: アップロード画面を開いたまま未送信一覧への反映を確認します")
+                _wait_for_ingestion(page, targets, media_types, existing, log)
+                log(f"[OK] Shutterstock: 対象 {len(targets)}件の反映を確認")
+                page.goto(PHOTO_URL, wait_until="domcontentloaded", timeout=30000)
+                _close_popups(page)
 
-                log("アップロード完了待機中（60秒）...")
-                time.sleep(60)
-
-                expected = len(files)
-                for attempt in range(4):
-                    log(f"  アップロード確認中 ({attempt + 1}/4)...")
-                    page.reload(wait_until="domcontentloaded", timeout=30000)
-                    time.sleep(4)
+            for media_type, label, url in (("photo", "画像", PHOTO_URL), ("video", "動画", VIDEO_URL)):
+                if media_type == "photo" and not use_photo_tab:
+                    continue
+                names = _ingested_names(page, {media_type})
+                if not names:
+                    log(f"{label}: 未送信なし")
+                    continue
+                if page.url != url:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(4000)
                     _close_popups(page)
-                    try:
-                        tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                        match = re.search(r'\((\d+)\)', tab_text)
-                        current = int(match.group(1)) if match else 0
-                        log(f"  Not submitted: {current}/{expected}")
-                        if current >= expected:
-                            log(f"  アップロード確認完了: {current}件")
-                            break
-                    except Exception:
-                        pass
-                    if attempt < 3:
-                        log("  まだ準備中... 30秒待機")
-                        time.sleep(30)
-                else:
-                    log("[!] アップロード確認タイムアウト。再待機します...")
-                    for retry in range(6):
-                        time.sleep(30)
-                        page.reload(wait_until="domcontentloaded", timeout=30000)
-                        time.sleep(4)
-                        _close_popups(page)
-                        try:
-                            tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                            match = re.search(r'\((\d+)\)', tab_text)
-                            current = int(match.group(1)) if match else 0
-                            if current >= expected:
-                                log(f"  再待機で反映確認: {current}件")
-                                break
-                            log(f"  ...再待機 {(retry+1)*30}秒, 現在{current}/{expected}件")
-                        except Exception:
-                            pass
-                    else:
-                        log(f"[!] 再待機タイムアウト: {current}/{expected}件で続行します")
 
-            # 未送信の画像が 0件の日は、画像タブに「CSVをアップロード」ボタンが出ない
-            # （2026-11-22 実機）。探すと「CSV アップロードボタンが見つかりません」で全体が止まるので、
-            # 画像タブの CSV・提出は飛ばして、動画タブ（STEP 5）で CSV を当てて提出する。
-            has_photo = _has_photos_on_portal(page, files, log)
-            if not has_photo:
-                log("画像: 未送信の画像が 0件なので、画像タブの CSV・提出は飛ばして動画タブへ進みます")
-            if has_photo:
-                # ============================================================
-                # STEP 3: CSVメタデータを適用（全選択はCSV反映後に行う）
-                # ============================================================
-                log(f"CSV適用中: {csv_path.name}")
-                csv_btn = page.locator('button[data-testid="csv-upload"]')
-                try:
-                    csv_btn.wait_for(state="visible", timeout=8000)
-                except PWTimeout:
-                    raise RuntimeError("CSV アップロードボタンが見つかりません")
-                csv_btn.click()
-                time.sleep(1)
+                with TemporaryDirectory(prefix="stock_tagger_ss_csv_") as folder:
+                    tab_csv = _csv_for_pending(csv_path, folder, fields, rows, names)
+                    if tab_csv is not None:
+                        _, reflected = _apply_csv_on_tab(page, tab_csv, log, label)
+                        if not reflected:
+                            log(f"[NG] {label}: CSV が適用されていません。審査提出を止めます")
+                            csv_unapplied.append(label)
+                            continue
 
-                dialog = page.locator('[role="dialog"]')
-                try:
-                    dialog.wait_for(state="visible", timeout=8000)
-                    log("CSVアップロードダイアログを開きました")
-                except PWTimeout:
-                    raise RuntimeError("CSVアップロードダイアログが開きません")
-
-                with page.expect_file_chooser(timeout=10000) as fc_info:
-                    dialog.get_by_role("button", name=re.compile("アップロード", re.I)).click()
-                fc_info.value.set_files(str(csv_path))
-                log(f"CSV セット完了: {csv_path.name}")
-                page.wait_for_timeout(4000)
-                _check_csv_import_result(page, log)
-
-                # ダイアログが閉じるのを待つ（最大10秒）
-                for _ in range(10):
-                    _check_csv_import_result(page, log)
-                    if not dialog.is_visible():
-                        break
-                    page.wait_for_timeout(1000)
-
-                # ページリロード → ポップアップ閉じ
-                page.reload(wait_until="domcontentloaded", timeout=30000)
-                time.sleep(5)
-                _close_popups(page)
-
-                # CSVメタデータ反映を待つ（上限 CSV_REFLECT_TIMEOUT_S。超えたら諦めて先へ進む）。
-                # 全選択は _wait_csv_reflected が毎回やり直す
-                # （reload は選択を解除し、送信ボタンを消すため）。
-                if _wait_csv_reflected(page, csv_path, log):
-                    log("CSV適用完了")
-                else:
-                    # 反映を確認できないまま提出しても、必須項目が空なので「未送信」に残るだけ。
-                    # ここで握り潰すと後段のファイル移動まで走ってしまうので、必ず戻り値に載せる。
-                    log("[NG] 画像: CSV が適用されていません。ファイル移動を止めます")
-                    csv_unapplied.append("画像")
-
-            # ============================================================
-            # STEP 4: 画像を審査提出
-            # ============================================================
-            if skip_submit:
-                # 送信ボタンは素材が選択されている時のみ表示されるため、
-                # 手動操作できるよう選択済みの状態で停止する
-                log("\n>> [テストモード] 全ファイルを選択して停止します...")
+                # 上限で以前から残っている素材は、メタデータ設定済みなら次回に提出できる。
                 _ensure_all_selected(page, log)
-                log("[テストモード] 審査提出ボタンの手前で停止します。ブラウザで手動操作してください。")
-            else:
-                if has_photo:
-                    log("画像: 審査提出中...")
-                    # 送信ボタンは素材が選択されている時のみ表示されるため、直前に再選択
-                    _ensure_all_selected(page, log)
-                    _r = _click_submit(page, log, "画像")
-                    if _r["clicked"]:
-                        log("[OK] 画像: 送信ボタンクリック完了")
-                    if _is_limit_error(_r["code"]):
-                        log(f"[!] 画像: Shutterstock の提出上限で束ごと拒否されました（{_r['message']}）")
-                        log("    1点ずつ送って、残り枠ぶんだけ提出します")
-                        _sent, _left, _msg = _submit_one_by_one(page, log, "画像")
-                        log(f"    1点ずつ提出 {_sent}点 / 上限で残した {_left}点")
-                        if _left:
-                            # 写真が無い日は写真タブにも動画のカードが並ぶ（2026-11-19 確認）
-                            limited.append(("素材", _left, _msg or _r["message"]))
+                if skip_submit:
+                    log(f"[テストモード] {label}: 審査提出ボタンの手前で停止しました。")
+                    continue
+
+                result = _click_submit(page, log, label)
+                if result["clicked"]:
+                    log(f"[OK] {label}: 送信ボタンクリック完了")
+                if _is_limit_error(result["code"]):
+                    log(f"[!] {label}: Shutterstock の提出上限で一括提出できません（{result['message']}）")
+                    sent, left, message = _submit_one_by_one(page, log, label)
+                    submitted += sent
+                    log(f"    1件ずつ提出 {sent}件 / 上限で残した {left}件")
+                    if left:
+                        limited.append((label, left, message or result["message"]))
                 else:
-                    # 画像が無い日の画像タブには動画のカードが並ぶ（2026-11-19 確認）。ここで送ると
-                    # CSV の当たっていない動画を出すことになるので、動画タブ（STEP 5）だけで出す。
-                    log("画像: 未送信の画像が無いので、画像タブの提出は飛ばします")
-                # ★ここでは成否を判定しない。
-                #   「未送信」カウンタは写真+動画を合算した全体の残数なので、
-                #   この時点ではまだ提出していない動画の分が必ず残って見える。
-                #   （写真提出直後「未送信 (1)」→ 動画タブでも同じ「未送信 (1)」→
-                #     動画提出後に (0)。写真は最初から全件提出できていた）
-                #   → 判定は写真・動画の提出が両方終わった STEP 5 で 1 回だけ行う。
-                submitted_photo = submitted
-                submitted += 1  # カウントは概算
+                    submitted += result["ok_count"]
 
-                # ============================================================
-                # STEP 5: 動画タブに切り替えて提出
-                # ============================================================
-                log("\n動画タブに切り替え中...")
-                page.goto(VIDEO_URL, wait_until="domcontentloaded", timeout=30000)
-                time.sleep(4)
-                _close_popups(page)
-
-                try:
-                    tab_text = page.locator('[data-testid="tab-not_submitted"]').inner_text(timeout=5000).strip()
-                    log(f"動画 not_submitted: {tab_text}")
-                    if "(0)" in tab_text:
-                        # 合算カウンタが 0 = 写真も動画も残っていない。
-                        # ここが写真提出の成否確認も兼ねる（種別ごとの数字は取れないため）。
-                        log("[OK] 未送信タブ: 全件提出完了（写真・動画とも残りなし）")
-                    else:
-                        log("動画: 全選択して提出...")
-                        try:
-                            page.locator('input[type="checkbox"]').first.wait_for(state="visible", timeout=15000)
-                        except PWTimeout:
-                            log("[!] 動画チェックボックスが見つかりません")
-
-                        # 動画タブでも CSV を当てる（2026-08-01 追加）。
-                        # 写真タブでの適用は、その日に静止画が無いと「CSVをアップロード」ボタン自体が
-                        # 存在せず実行できない。動画だけの日に動画のメタデータが空のまま残るのを防ぐ。
-                        # 成功時は全選択まで済むので、失敗したときだけ従来どおり全選択する。
-                        # 当てるのは動画の行だけ（提出済みの画像の行は「見つからない」で拒否されるため）。
-                        _video_csv = _video_only_csv(csv_path, log)
-                        if _video_csv is None:
-                            log("[!] 動画: CSV に動画の行がありません。動画タブでの CSV 適用をスキップします")
-                            _video_ok, _video_reflected = False, False
-                        else:
-                            _video_ok, _video_reflected = _apply_csv_on_tab(page, _video_csv, log, "動画")
-                        if not _video_ok:
-                            _select_all(page, log)
-                        if not _video_reflected:
-                            log("[NG] 動画: CSV が適用されていません。ファイル移動を止めます")
-                            csv_unapplied.append("動画")
-
-                        _r = _click_submit(page, log, "動画")
-                        if _r["clicked"]:
-                            log("[OK] 動画: 提出ボタンクリック完了")
-                        if _is_limit_error(_r["code"]):
-                            log(f"[!] 動画: Shutterstock の提出上限で束ごと拒否されました（{_r['message']}）")
-                            log("    1本ずつ送って、残り枠ぶんだけ提出します")
-                            _sent, _left, _msg = _submit_one_by_one(page, log, "動画")
-                            log(f"    動画: 1本ずつ提出 {_sent}本 / 上限で残した {_left}本")
-                            if _left:
-                                limited.append(("動画", _left, _msg or _r["message"]))
-
-                        # ★写真・動画の提出が両方終わったのでここで 1 回だけ判定する。
-                        #   カウンタは合算なので、残っていても種別は特定できない。
-                        #   ラベルは「未送信」にして、写真のせいだと決めつけない。
-                        state, tab_text_after = _wait_not_submitted_cleared(page, log, "未送信")
-                        if state == "remains" and limited:
-                            # 残りは提出上限のせい（ポータルの返事で確定）。条件不足ではない
-                            log(f"[!] 未送信に残った分は提出上限によるものです: {tab_text_after}")
-                        elif state == "remains":
-                            unsubmitted.append(("未送信", tab_text_after))
-                        elif state == "unknown":
-                            unverified.append(("未送信", tab_text_after or "カウンタ読み取り不能"))
-
-                except PWTimeout:
-                    log("[!] 動画: not_submittedタブの確認ができませんでした")
-                    # 写真側の判定もここに集約したので、読めなかった = 未検証として残す
-                    unverified.append(("未送信", "カウンタ読み取り不能"))
+            if not skip_submit:
+                state, detail = _wait_not_submitted_cleared(page, log, "未送信")
+                if state == "remains" and limited:
+                    log(f"[!] 未送信に残った分は提出上限によるものです: {detail}")
+                elif state == "remains":
+                    unsubmitted.append(("未送信", detail))
+                elif state == "unknown":
+                    unverified.append(("未送信", detail or "カウンタ読み取り不能"))
 
         except Exception as e:
             log(f"[NG] Error: {e}")
